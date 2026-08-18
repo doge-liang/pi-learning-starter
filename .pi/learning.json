@@ -1,0 +1,9 @@
+{
+  "models": {
+    "planner": "anthropic/claude-opus-5",
+    "assessor": "anthropic/claude-opus-5",
+    "librarian": "anthropic/claude-sonnet-5",
+    "tutor": "anthropic/claude-sonnet-5",
+    "reviewer": "anthropic/claude-sonnet-5"
+  }
+}

@@ -1,0 +1,4 @@
+.pi/learning-handoff.json
+cron.log
+node_modules/
+*.tsbuildinfo
