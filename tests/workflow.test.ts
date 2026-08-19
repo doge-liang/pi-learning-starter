@@ -12,7 +12,7 @@ import { fileURLToPath } from "node:url";
 import learningExtension from "../.pi/extensions/learning/index.ts";
 import { INTERVALS, LEVELS } from "../.pi/extensions/learning/blackboard.ts";
 import { READ_TOOLS, ROLES } from "../.pi/extensions/learning/roles.ts";
-import { FakePi, makeCtx, makeProject } from "./fake-pi.ts";
+import { FakePi, makeCtx, makeProject, type UiScript } from "./fake-pi.ts";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
 
@@ -38,7 +38,7 @@ describe("学习工作流（全流程）", () => {
 	const project = makeProject(repoRoot);
 	const bbDir = join(project.cwd, "blackboard");
 	const pi = new FakePi();
-	const uiScript = { editor: [] as Array<string | undefined>, select: [] as Array<string | undefined>, confirm: [] as boolean[] };
+	const uiScript: Required<UiScript> = { editor: [], select: [], confirm: [] };
 	const ctx = makeCtx(pi, { cwd: project.cwd, ui: uiScript, models: { "anthropic/claude-opus-5": { provider: "anthropic", id: "claude-opus-5" } } });
 
 	before(async () => {
@@ -47,16 +47,63 @@ describe("学习工作流（全流程）", () => {
 	});
 	after(() => project.cleanup());
 
-	it("注册了 9 个 bb_* 工具、16 个命令与 4 个事件处理器", () => {
+	it("注册了 10 个 bb_* 工具、20 个命令与 4 个事件处理器", () => {
 		const bbTools = [...pi.tools.keys()].filter((n) => n.startsWith("bb_"));
-		assert.equal(bbTools.length, 9, bbTools.join(","));
-		assert.equal(pi.commands.size, 16, [...pi.commands.keys()].join(","));
+		assert.equal(bbTools.length, 10, bbTools.join(","));
+		assert.equal(pi.commands.size, 20, [...pi.commands.keys()].join(","));
 		assert.deepEqual([...pi.handlers.keys()].sort(), ["before_agent_start", "input", "session_start", "tool_call"]);
 	});
 
-	it("启动时无角色：只从白名单里摘掉 bb_* 工具，提示已加载", () => {
+	it("启动时无角色：只从白名单里摘掉 bb_* 工具；未做访谈时提示先 /domain", () => {
 		assert.deepEqual(pi.activeTools, pi.builtin);
-		assert.ok(ctx.notices.some(([, m]) => m.includes("学习工作流已加载")));
+		assert.ok(ctx.notices.some(([, m]) => m.includes("先运行 /domain")));
+	});
+
+	// ------------------------------------------------------------ 流程 0：入学访谈
+	describe("流程 0：入学访谈（/domain）", () => {
+		it("未访谈时 /plan 被拒绝并指向 /domain", async () => {
+			ctx.notices.length = 0;
+			await pi.command("plan").handler("", ctx);
+			assert.ok(ctx.notices.some(([, m]) => m.includes("/domain")));
+			assert.equal(pi.activeTools?.includes("bb_plan_propose"), false);
+		});
+
+		it("/domain 进入学习顾问；bb_domain_set 经确认写入 domain.json，取消则不写", async () => {
+			pi.sentMessages.length = 0;
+			await pi.command("domain").handler("", ctx);
+			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.intake.tools]);
+			assert.match(pi.lastMessage(), /^\[begin-intake\] 请开始入学访谈/);
+			const ctxText = (await contextOf(pi, ctx))?.message?.content ?? "";
+			assert.ok(ctxText.includes("现有 domain.json"));
+
+			const params = {
+				domain: "深度学习框架内部原理",
+				goal: "能够独立阅读 PyTorch 自动微分与计算图相关的核心代码，并从零实现一个最小的自动微分引擎",
+				background: "会写 Python；线性代数与微积分达到本科水平；用过 PyTorch 训练模型。",
+				weekly_hours: 8,
+				language: "zh",
+				preferences: { formats: ["textbook", "paper", "code"] },
+			};
+			uiScript.confirm.push(false);
+			const r0 = await pi.tool("bb_domain_set").execute("t", params, undefined, undefined, ctx);
+			assert.match(r0.content[0].text, /未确认/);
+			assert.equal(readJson(join(bbDir, "domain.json")).domain, undefined);
+
+			uiScript.confirm.push(true);
+			const r1 = await pi.tool("bb_domain_set").execute("t", params, undefined, undefined, ctx);
+			assert.match(r1.content[0].text, /\/plan/);
+			const d = readJson(join(bbDir, "domain.json"));
+			assert.equal(d.domain, "深度学习框架内部原理");
+			assert.equal(d.weekly_hours, 8);
+			assert.deepEqual(d.preferences.formats, ["textbook", "paper", "code"]);
+			assert.deepEqual(d.preferences.languages, ["zh", "en"], "未提交的 preferences 键保留种子值");
+		});
+
+		it("再次 /domain 时开场语说明已有内容；bb_domain_set 只在 intake 角色可用", async () => {
+			pi.sentMessages.length = 0;
+			await pi.command("domain").handler("", ctx);
+			assert.match(pi.lastMessage(), /已有内容/);
+		});
 	});
 
 	// ------------------------------------------------------------ 流程 A：规划
@@ -116,7 +163,8 @@ describe("学习工作流（全流程）", () => {
 				notes: "依据 Deep Learning (Goodfellow) 第 6 章",
 			};
 			const r = await pi.tool("bb_plan_propose").execute("t", proposal);
-			assert.match(r.content[0].text, /4 个概念，2 个单元/);
+			assert.match(r.content[0].text, /4 个概念（core 3，branch 1），2 个单元/);
+			assert.match(r.content[0].text, /- u01 张量与计算图：张量（Tensor）、计算图（Computation Graph）/);
 			assert.ok(existsSync(join(bbDir, "proposals")));
 
 			uiScript.confirm.push(true);
@@ -159,6 +207,22 @@ describe("学习工作流（全流程）", () => {
 			assert.deepEqual(units[0].sources, ["dl-ch6"]);
 			assert.deepEqual(units[1].sources, ["cs231n-bp"]);
 			assert.ok(readJsonl(join(bbDir, "events.jsonl")).every((e) => e.type !== "structure_ready" || e.handled));
+		});
+
+		it("/verify 由学习者亲自置位 verified：指定 id、从列表选择、取消", async () => {
+			assert.deepEqual(pi.command("verify").getArgumentCompletions?.("dl")?.map((x) => x.value), ["dl-ch6"]);
+			uiScript.confirm.push(true);
+			await pi.command("verify").handler("dl-ch6", ctx);
+			assert.equal(readJson(join(bbDir, "sources.json")).sources.find((x: any) => x.id === "dl-ch6").verified, true);
+			assert.equal(pi.command("verify").getArgumentCompletions?.("dl"), null, "已核验的不再补全");
+			// 无参数：从未核验列表中选择
+			uiScript.select.push("cs231n-bp  CS231n Backprop notes");
+			uiScript.confirm.push(false);
+			await pi.command("verify").handler("", ctx);
+			assert.equal(readJson(join(bbDir, "sources.json")).sources.find((x: any) => x.id === "cs231n-bp").verified, false, "取消则不置位");
+			ctx.notices.length = 0;
+			await pi.command("verify").handler("nope", ctx);
+			assert.ok(ctx.notices.some(([, m]) => m.includes("不在 sources.json")));
 		});
 
 		it("bb_check_link 只在馆员角色可用", async () => {
@@ -301,7 +365,13 @@ describe("学习工作流（全流程）", () => {
 	describe("流程 C：产出与评审", () => {
 		it("/review 进入评审员；bb_review 写入 md 与 json，误解入错误日志", async () => {
 			const artifact = join(bbDir, "artifacts", "graph.md");
-			writeFileSync(artifact, "# 我的计算图笔记\n\n边表示数据。\n", "utf8");
+			uiScript.editor.push("# 我的计算图笔记\n\n边表示数据。");
+			ctx.notices.length = 0;
+			await pi.command("artifact").handler("graph", ctx);
+			assert.ok(existsSync(artifact), "/artifact 缺省补 .md 并落盘");
+			assert.ok(ctx.notices.some(([, m]) => m.includes("/review blackboard/artifacts/graph.md")));
+			await pi.command("artifact").handler("../evil.md", ctx);
+			assert.ok(ctx.notices.some(([, m]) => m.includes("只接受文件名")));
 			pi.sentMessages.length = 0;
 			await pi.command("review").handler(`blackboard/artifacts/graph.md u01`, ctx);
 			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.reviewer.tools]);
@@ -409,6 +479,22 @@ describe("学习工作流（全流程）", () => {
 			assert.ok(errors.filter((e) => e.concept === "autograd-graph").every((e) => !e.resolved), "未通过的概念错误保持未解决");
 			const events = readJsonl(join(bbDir, "events.jsonl"));
 			assert.ok(events.some((e) => e.type === "replan_request" && !e.handled));
+		});
+
+		it("/reflect 在提纲后就地写复盘：编辑器预填提纲，未修改则不写", async () => {
+			const outline = mustFind(join(bbDir, "reflections"), "-outline.md");
+			const before = readFileSync(join(bbDir, "reflections", outline), "utf8");
+			uiScript.editor.push((prefill: string) => prefill);
+			ctx.notices.length = 0;
+			await pi.command("reflect").handler("", ctx);
+			assert.ok(ctx.notices.some(([, m]) => m.includes("未修改")));
+			uiScript.editor.push((prefill: string) => {
+				assert.ok(prefill.includes("我的复盘（学习者亲笔）"), "编辑器预填提纲");
+				return `${prefill}计算图的边我一直理解成数据，这次才分清依赖与数据。\n`;
+			});
+			await pi.command("reflect").handler("", ctx);
+			const after = readFileSync(join(bbDir, "reflections", outline), "utf8");
+			assert.ok(after.startsWith(before) && after.includes("分清依赖与数据"));
 		});
 
 		it("连续通过三次即 consolidated；部分通过两天后复测", async () => {

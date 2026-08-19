@@ -17,14 +17,14 @@ describe("pi 扩展加载器", () => {
 	const agentDir = mkdtempSync(join(tmpdir(), "pi-learning-agentdir-"));
 	after(() => rmSync(agentDir, { recursive: true, force: true }));
 
-	it("jiti 发现并加载扩展：无错误；9 个 bb_* 工具、16 个命令、4 个事件、1 个条目渲染器", async () => {
+	it("jiti 发现并加载扩展：无错误；10 个 bb_* 工具、20 个命令、4 个事件、1 个条目渲染器", async () => {
 		const result = await discoverAndLoadExtensions([], repoRoot, agentDir);
 		assert.deepEqual(result.errors, []);
 		const ext = result.extensions.find((e) => e.resolvedPath.replace(/\\/g, "/").endsWith(".pi/extensions/learning/index.ts"));
 		assert.ok(ext, `未发现学习扩展；已加载：${result.extensions.map((e) => e.path).join(", ")}`);
 		const tools = [...ext.tools.keys()].sort();
-		assert.deepEqual(tools, ["bb_check_link", "bb_evidence", "bb_grade", "bb_plan_propose", "bb_prequestions", "bb_review", "bb_sources_propose", "bb_status", "bb_test_create"]);
-		assert.equal(ext.commands.size, 16);
+		assert.deepEqual(tools, ["bb_check_link", "bb_domain_set", "bb_evidence", "bb_grade", "bb_plan_propose", "bb_prequestions", "bb_review", "bb_sources_propose", "bb_status", "bb_test_create"]);
+		assert.equal(ext.commands.size, 20);
 		assert.deepEqual([...ext.handlers.keys()].sort(), ["before_agent_start", "input", "session_start", "tool_call"]);
 		assert.equal(ext.entryRenderers?.size, 1);
 		// 每个 bb_* 工具都声明了 sequential，避免并行写黑板（bb_check_link 只读，不作要求）

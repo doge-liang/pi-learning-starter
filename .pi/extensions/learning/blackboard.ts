@@ -202,6 +202,13 @@ export class Blackboard {
 	domain(): Domain {
 		return this.readJson<Domain>("domain.json", {});
 	}
+	/** 入学访谈写入：按提交内容覆盖，未提交的字段与 preferences 中未提及的键保留 */
+	saveDomain(patch: Domain): Domain {
+		const prev = this.domain();
+		const merged: Domain = { ...prev, ...patch, preferences: { ...(prev.preferences ?? {}), ...(patch.preferences ?? {}) } };
+		this.writeJson("domain.json", merged);
+		return merged;
+	}
 	concepts(): Concept[] {
 		return this.readJson<{ concepts: Concept[] }>("concepts.json", { concepts: [] }).concepts ?? [];
 	}
@@ -220,6 +227,15 @@ export class Blackboard {
 	}
 	saveSources(sources: Source[]): void {
 		this.writeJson("sources.json", { sources });
+	}
+	/** 学习者亲自核验资料后置位（只有 /verify 命令调用，模型没有这条路径） */
+	verifySource(id: string, verified = true): Source | undefined {
+		const sources = this.sources();
+		const s = sources.find((x) => x.id === id);
+		if (!s) return undefined;
+		s.verified = verified;
+		this.saveSources(sources);
+		return s;
 	}
 
 	conceptIndex(): Map<string, Concept> {
@@ -339,7 +355,7 @@ export class Blackboard {
 		const ev = this.unhandledEvents();
 		const pending = this.listFiles("assessments", "pending-", ".json");
 		return [
-			`领域：${this.domain().domain ?? "（未设置，请编辑 blackboard/domain.json）"}`,
+			`领域：${this.domain().domain ?? "（未设置，运行 /domain 开始入学访谈）"}`,
 			`掌握度：${LEVELS.map((lv) => `${lv} ${counts[lv]}`).join("  ")}`,
 			unit ? `当前单元：${unit.id} ${unit.title}（${unit.status ?? "pending"}）` : "当前单元：无（先运行 /plan）",
 			`到期复习概念：${this.dueConcepts().length}　未解决错误：${this.unresolvedErrors().length}`,
@@ -367,6 +383,27 @@ export class Blackboard {
 			.map((f) => ({ f, t: statSync(this.path("proposals", f)).mtimeMs }))
 			.sort((a, b) => a.t - b.t || (a.f < b.f ? -1 : 1));
 		return this.path("proposals", ranked[ranked.length - 1].f);
+	}
+
+	/** 提案的可读摘要：供工具返回值与 /accept 的确认框使用，让学习者不必打开 JSON 文件审阅 */
+	summarizeProposal(data: { concepts?: Concept[]; units?: Unit[]; notes?: string; sources?: Source[] }): string {
+		if (Array.isArray(data.sources)) {
+			return [
+				`资料提案：${data.sources.length} 份`,
+				...data.sources.map((s) => `- ${s.id}｜${s.title}｜${s.type ?? "?"}｜${s.locator ?? "?"}｜约 ${s.est_minutes ?? "?"} 分钟 → 单元 ${(s.for_units ?? []).join(", ") || "无"}${s.alternative ? "（替代）" : ""}`),
+			].join("\n");
+		}
+		const concepts = data.concepts ?? [];
+		const units = data.units ?? [];
+		const core = concepts.filter((c) => c.tier === "core").length;
+		const names = new Map(concepts.map((c) => [c.id, c.name]));
+		return [
+			`规划提案：${concepts.length} 个概念（core ${core}，branch ${concepts.length - core}），${units.length} 个单元`,
+			...units.map((u) => `- ${u.id} ${u.title}：${u.concepts.map((id) => names.get(id) ?? id).join("、")}（退出标准 ${u.exit_criteria?.length ?? 0} 条）`),
+			data.notes ? `依据：${data.notes}` : "",
+		]
+			.filter(Boolean)
+			.join("\n");
 	}
 
 	/** 接受后把 x.json 改名为 x.accepted.json，避免 /accept 重复合并同一份提案 */

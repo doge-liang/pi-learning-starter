@@ -25,7 +25,8 @@ export interface RegisteredCommand {
 
 /** 预置的对话框答案队列：editor / select / confirm 依次弹出时按顺序消费 */
 export interface UiScript {
-	editor?: Array<string | undefined>;
+	/** 字符串直接作为编辑结果；函数则接收预填文本并返回编辑结果（用于 /reflect 这类就地编辑） */
+	editor?: Array<string | undefined | ((prefill: string) => string | undefined)>;
 	select?: Array<string | undefined>;
 	confirm?: boolean[];
 }
@@ -136,7 +137,10 @@ export function makeCtx(pi: FakePi, opts: HarnessOptions): ExtensionCommandConte
 		ui: {
 			notify: (msg: string, level = "info") => notices.push([level, msg]),
 			confirm: async () => (ui.confirm ?? []).shift() ?? false,
-			editor: async () => (ui.editor ?? []).shift(),
+			editor: async (_title: string, prefill = "") => {
+				const v = (ui.editor ?? []).shift();
+				return typeof v === "function" ? v(prefill) : v;
+			},
 			select: async () => (ui.select ?? []).shift(),
 			input: async () => undefined,
 			setStatus: (key: string, text: string | undefined) => statuses.set(key, text),

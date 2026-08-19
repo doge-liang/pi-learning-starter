@@ -4,7 +4,7 @@
  * 角色会话的隔离靠 pi 的会话：/plan、/sources、/read、/review、/assess 会通过 ctx.newSession 切到新会话，
  * 目标角色通过交接文件传给新的扩展实例（见 state.ts）。当前会话尚无消息时则直接在原地进入角色。
  */
-import { existsSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { type Blackboard, today } from "./blackboard.ts";
@@ -49,27 +49,69 @@ export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
 		handler: async (_args, ctx) => deps.note(ctx, bb.status()),
 	});
 
+	pi.registerCommand("domain", {
+		description: "学习顾问：入学访谈，通过对话整理领域、目标、背景与偏好并写入 domain.json（再次运行可修改）",
+		handler: async (_args, ctx) => {
+			const existing = Boolean(bb.domain().domain);
+			await enter(ctx, "intake", {}, `intake ${today()}`, kickoff("intake", { existing }));
+		},
+	});
+
 	pi.registerCommand("plan", {
 		description: "领域专家：规划（/plan）或增量重规划（/plan replan）",
 		handler: async (args, ctx) => {
-			if (!bb.domain().domain) return ctx.ui.notify("请先填写 blackboard/domain.json。", "warning");
+			if (!bb.domain().domain) return ctx.ui.notify("还没有学习者画像；请先运行 /domain 完成入学访谈。", "warning");
 			const replan = args.trim() === "replan";
 			await enter(ctx, "planner", {}, `planner ${replan ? "replan" : "plan"} ${today()}`, kickoff("planner", { replan }));
 		},
 	});
 
 	pi.registerCommand("accept", {
-		description: "接受最近一份（或指定的）规划 / 资料提案，写入黑板",
+		description: "接受最近一份尚未接受的（或指定的）规划 / 资料提案，写入黑板",
 		handler: async (args, ctx) => {
 			const file = args.trim() ? resolve(ctx.cwd, args.trim()) : bb.latestProposal();
 			if (!file || !existsSync(file)) return ctx.ui.notify("没有可接受的提案文件。", "warning");
-			const ok = ctx.hasUI ? await ctx.ui.confirm("接受提案？", `将把 ${file} 合并进黑板。请确认已审阅并按需修改。`) : true;
+			let summary = file;
+			try {
+				summary = bb.summarizeProposal(JSON.parse(readFileSync(file, "utf8")));
+			} catch {
+				/* 摘要失败时退回显示路径 */
+			}
+			const ok = ctx.hasUI ? await ctx.ui.confirm("接受提案？", `${summary}\n\n接受后写入黑板。要修改请回到该角色会话说明，由其重新提交。`) : true;
 			if (!ok) return;
 			try {
 				deps.note(ctx, applyProposal(bb, file));
 			} catch (e) {
 				ctx.ui.notify(String((e as Error).message ?? e), "error");
 			}
+		},
+	});
+
+	pi.registerCommand("verify", {
+		description: "标记一份资料为已亲自核验：/verify <资料id>；无参数时从未核验列表中选择",
+		getArgumentCompletions: (prefix) => {
+			const items = bb
+				.sources()
+				.filter((s) => !s.verified && s.id.startsWith(prefix))
+				.map((s) => ({ value: s.id, label: `${s.id} ${s.title}` }));
+			return items.length ? items : null;
+		},
+		handler: async (args, ctx) => {
+			let id = args.trim();
+			if (!id) {
+				const pending = bb.sources().filter((s) => !s.verified);
+				if (!pending.length) return ctx.ui.notify("所有资料都已核验。", "info");
+				if (!ctx.hasUI) return ctx.ui.notify("用法：/verify <资料id>", "warning");
+				const pick = await ctx.ui.select("选择已亲自核验的资料", pending.map((s) => `${s.id}  ${s.title}`));
+				if (!pick) return;
+				id = pick.split(/\s+/)[0];
+			}
+			const s = bb.sources().find((x) => x.id === id);
+			if (!s) return ctx.ui.notify(`资料 ${id} 不在 sources.json 中。`, "warning");
+			const ok = ctx.hasUI ? await ctx.ui.confirm("确认核验？", `${s.title}\n${s.locator ?? ""}\n\n你已亲自打开这份资料，确认它存在且适合对应单元？`) : true;
+			if (!ok) return;
+			bb.verifySource(id, true);
+			ctx.ui.notify(`已标记 ${id} 为已核验。`, "info");
 		},
 	});
 
@@ -207,6 +249,38 @@ export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
 			} else {
 				await enter(ctx, "assessor", { testFile: rel, responses }, `assessor grade ${today()}`, msg);
 			}
+		},
+	});
+
+	pi.registerCommand("reflect", {
+		description: "亲笔写复盘：在最近一份（或指定的）复盘提纲后作答，/reflect [文件]",
+		handler: async (args, ctx) => {
+			const outlines = bb.listFiles("reflections", "", "-outline.md");
+			const rel = args.trim() ? `reflections/${args.trim().replace(/^.*reflections[\\/]/, "")}` : outlines.length ? `reflections/${outlines[outlines.length - 1]}` : undefined;
+			if (!rel || !existsSync(bb.path(rel))) return ctx.ui.notify("没有复盘提纲；先完成一次 /take 与批改。", "warning");
+			if (!ctx.hasUI) return ctx.ui.notify("该命令需要交互界面。", "warning");
+			const current = bb.readText(rel);
+			const edited = await ctx.ui.editor(`复盘：${rel}（提纲之后「我的复盘」一节由你亲笔作答）`, current);
+			if (edited === undefined || edited === current) return ctx.ui.notify("未修改。", "info");
+			bb.writeText(rel, edited.endsWith("\n") ? edited : `${edited}\n`);
+			ctx.ui.notify(`已保存 ${rel}。`, "info");
+		},
+	});
+
+	pi.registerCommand("artifact", {
+		description: "写一份产出物到 blackboard/artifacts/：/artifact <文件名>（缺省扩展名 .md），然后可 /review",
+		handler: async (args, ctx) => {
+			let name = args.trim();
+			if (!name) return ctx.ui.notify("用法：/artifact <文件名>", "warning");
+			if (!/\.[a-z0-9]+$/i.test(name)) name += ".md";
+			if (/[\\/]/.test(name)) return ctx.ui.notify("只接受文件名，不接受路径。", "warning");
+			if (!ctx.hasUI) return ctx.ui.notify("该命令需要交互界面。", "warning");
+			const rel = `artifacts/${name}`;
+			const current = bb.readText(rel);
+			const body = await ctx.ui.editor(`产出物：${rel}（在无 AI 协助下完成）`, current);
+			if (body === undefined || !body.trim()) return;
+			bb.writeText(rel, body.endsWith("\n") ? body : `${body}\n`);
+			ctx.ui.notify(`已保存 blackboard/${rel}。评审：/review blackboard/${rel} [单元id]`, "info");
 		},
 	});
 

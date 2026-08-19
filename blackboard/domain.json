@@ -1,8 +1,15 @@
 {
-  "domain": "深度学习框架内部原理（示例，请替换为你的领域）",
-  "goal": "能够独立阅读 PyTorch 自动微分与计算图相关的核心代码，并从零实现一个最小的自动微分引擎",
-  "background": "会写 Python；线性代数与微积分达到本科水平；用过 PyTorch 训练模型，但没有读过框架内部实现。",
-  "weekly_hours": 8,
   "language": "zh",
-  "preferences": { "formats": ["textbook", "paper", "code", "course"], "languages": ["zh", "en"] }
+  "preferences": {
+    "formats": [
+      "textbook",
+      "paper",
+      "course",
+      "code"
+    ],
+    "languages": [
+      "zh",
+      "en"
+    ]
+  }
 }

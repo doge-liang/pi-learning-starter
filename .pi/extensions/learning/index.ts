@@ -3,7 +3,7 @@
  *
  * 结构映射（设计稿 → pi）：
  * - 黑板              → 项目里的 blackboard/ 目录（blackboard.ts）
- * - 五个角色          → 五段系统提示 + 各自的工具白名单（roles.ts），通过 before_agent_start 注入
+ * - 六个角色          → 六段系统提示 + 各自的工具白名单（roles.ts），通过 before_agent_start 注入
  * - 规则在代码        → bb_* 工具内部的状态机与阈值（tools.ts、blackboard.ts）
  * - 角色会话隔离      → pi 会话：流程命令用 ctx.newSession 切换，角色经交接文件传递（state.ts）
  * - 学习者交互        → 斜杠命令 + ctx.ui 对话框（commands.ts）
@@ -103,7 +103,12 @@ export default function (pi: ExtensionAPI) {
 			// 无角色的普通会话：从当前白名单里摘掉 bb_*，其余（含 --tools 等配置）保持不动
 			pi.setActiveTools(nonBlackboardTools(pi.getActiveTools()));
 			if (event.reason === "startup" && ctx.hasUI && bb.exists()) {
-				ctx.ui.notify("学习工作流已加载：/learn 查看黑板；/plan、/sources、/read、/review、/assess 进入各角色。", "info");
+				ctx.ui.notify(
+					bb.domain().domain
+						? "学习工作流已加载：/learn 查看黑板；/plan、/sources、/read、/review、/assess 进入各角色。"
+						: "学习工作流已加载：先运行 /domain 做入学访谈，再 /plan 规划。",
+					"info",
+				);
 			}
 		}
 	});

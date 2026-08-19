@@ -1,5 +1,5 @@
 /**
- * roles.ts —— 五个角色：系统提示、工具白名单、会话开场语、以及从黑板装配的上下文。
+ * roles.ts —— 六个角色（五个学习角色加入学访谈的学习顾问）：系统提示、工具白名单、会话开场语、以及从黑板装配的上下文。
  *
  * 角色提示是稳定文本（追加到 pi 的系统提示之后，利于提示缓存）；黑板上下文单独作为一条
  * 自定义消息注入，只在内容变化时重新注入（见 index.ts 的 before_agent_start）。
@@ -26,6 +26,22 @@ const COMMON = `
 - 「黑板上下文」消息给出了当前所需的大部分结构化数据；需要更多细节时用 read 读取 blackboard/ 下的文件。`;
 
 export const ROLES: Record<Role, RoleDef> = {
+	intake: {
+		name: "intake",
+		label: "学习顾问（入学访谈）",
+		tools: ["bb_status", "bb_domain_set"],
+		prompt: `# 角色：学习顾问（入学访谈，Intake）
+
+你通过对话帮助一位成年自学者把学习意图整理成黑板上的 domain.json。你只做访谈与整理，不规划知识结构，不推荐资料。
+
+## 规则
+1. 需要收集六项：domain（领域，一句话）、goal（可检验的目标：学完后能独立做到什么）、background（已有知识与经验，包括相关的数学、编程、工具）、weekly_hours（每周可投入的小时数）、language（对话与资料的语言偏好）、preferences（资料类型偏好：教材、论文、课程、代码、视频等，以及可接受的语言）。
+2. 每次只问一到两个问题，先问领域与目标。学习者已经说清楚的不要重复问。目标含糊时追问到可检验为止：不是「了解 X」，而是「能独立做到 Y」。
+3. 黑板上下文中若已有 domain.json，先复述现状，只问要修改什么；未提及的字段保持不变。
+4. 信息足够时，用一段话复述整理结果请学习者确认；确认后调用 bb_domain_set 写入。写入前学习者还会在对话框里最终确认。
+5. 写入后告诉学习者下一步运行 /plan。
+${COMMON}`,
+	},
 	planner: {
 		name: "planner",
 		label: "领域专家（课程规划者）",
@@ -136,6 +152,10 @@ export function buildContext(bb: Blackboard, state: LearningState): string {
 	parts.push("## 学习者", j({ domain: domain.domain, goal: domain.goal, background: domain.background, language: domain.language }));
 
 	switch (state.role) {
+		case "intake": {
+			parts.push("## 现有 domain.json（为空则是首次访谈）", j(domain));
+			break;
+		}
 		case "planner": {
 			parts.push("## 现有概念与掌握度", j(bb.conceptBrief()));
 			parts.push("## 现有路径", j(bb.units()));
@@ -212,8 +232,12 @@ function recentEvidence(bb: Blackboard, n = 8): unknown[] {
 // 会话开场语
 // ======================================================================
 
-export function kickoff(role: Role, opts: { replan?: boolean; units?: string[]; unit?: string; note?: string; artifact?: string; maxItems?: number } = {}): string {
+export function kickoff(role: Role, opts: { replan?: boolean; units?: string[]; unit?: string; note?: string; artifact?: string; maxItems?: number; existing?: boolean } = {}): string {
 	switch (role) {
+		case "intake":
+			return opts.existing
+				? "[begin-intake] domain.json 已有内容。请先复述现状，然后问我要修改什么；整理好后调用 bb_domain_set。"
+				: "[begin-intake] 请开始入学访谈：先了解我要学什么领域、想达到什么可检验的目标。";
 		case "planner":
 			return opts.replan
 				? "请做增量重规划：依据黑板上下文中的测评结果与未解决错误，插入补救单元、调整顺序、修剪不必要的分支，保留已有概念 id，然后调用 bb_plan_propose 提交提案。"

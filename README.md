@@ -1,6 +1,6 @@
 # pi 学习工作流（starter）
 
-设计稿「五个 Agent 与一块黑板」在 pi 上的最小实现。黑板是 `blackboard/` 目录，五个角色是五段系统提示加各自的工具白名单，规则写在 `.pi/extensions/learning/` 的 bb_* 工具里，角色会话的隔离靠 pi 的会话机制。完整的设计说明见 [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md)。
+设计稿「五个 Agent 与一块黑板」在 pi 上的最小实现。黑板是 `blackboard/` 目录，五个学习角色（加一个只做入学访谈的学习顾问）是六段系统提示加各自的工具白名单，规则写在 `.pi/extensions/learning/` 的 bb_* 工具里，角色会话的隔离靠 pi 的会话机制。完整的设计说明见 [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md)。
 
 ## 安装
 
@@ -13,21 +13,23 @@ pi
 
 首次进入会询问是否信任本项目（加载 `.pi/extensions`）；选择信任，或运行 `/trust` 保存决定。启动后会看到「学习工作流已加载」的提示；`/learn` 查看黑板。
 
-角色使用的模型在 `.pi/learning.json` 中配置（`provider/modelId`），未配置则沿用当前模型；用 `pi --list-models` 查看可用模型。
+角色使用的模型在 `.pi/learning.json` 中配置（`provider/modelId`），未配置则沿用当前模型；用 `pi --list-models` 查看可用模型。这是唯一需要手工编辑的文件，且是可选的。
 
 ## 三十分钟上手
 
-1. 编辑 `blackboard/domain.json`。
-2. `/plan` → 领域专家读取黑板并调用 `bb_plan_propose` 写提案 → 打开 `blackboard/proposals/plan-*.json` 审阅、按需修改 → `/accept`。
-3. `/sources` → 资料管理员为每个单元匹配资料 → 核对 → `/accept` → 亲自打开每份资料，确认后把 `sources.json` 中对应的 `verified` 改为 `true`。
+学习者的界面始终是 pi 里的对话与对话框，不需要手改黑板文件。
+
+1. `/domain` → 学习顾问通过几轮问答整理你的领域、可检验的目标、背景、每周小时数与资料偏好，复述确认后调用 `bb_domain_set`，你在对话框里最终确认写入。以后要改，再运行 `/domain`。
+2. `/plan` → 领域专家读取黑板并调用 `bb_plan_propose`；提案摘要会出现在对话里，要调整直接说，它重新提交；满意后 `/accept`（确认框里再次显示摘要）。
+3. `/sources` → 资料管理员为每个单元匹配资料，同样在对话里核对后 `/accept`；然后亲自打开每份资料，`/verify <资料id>`（无参数时从未核验列表里选）标记已核验。`verified` 只有这一条路径。
 4. `/read` → 进入当前单元的陪读会话：老师给预问题；你去读资料，卡住了直接提问（默认最小提示，`/explain` 切换讲解）；读完 `/answer` 闭卷作答并给信心；`/gloss <概念id>` 写术语表并请老师核对；`/done` 结束，老师调用 `bb_evidence`，掌握度最多推进到 learned。
-5. 做完练习或代码后放进 `blackboard/artifacts/`，`/review <文件> <单元id>`。
-6. `/assess` 生成测试 → `/take` 闭卷作答并给信心 → 老师调用 `bb_grade`：升级、降级、校准、复盘提纲 → 在 `blackboard/reflections/` 里亲笔写复盘。
+5. `/artifact <名字>` 在编辑器里写练习、推导或复述（代码类产出也可直接放进 `blackboard/artifacts/`），然后 `/review blackboard/artifacts/<文件> <单元id>`。
+6. `/assess` 生成测试 → `/take` 闭卷作答并给信心 → 老师调用 `bb_grade`：升级、降级、校准、复盘提纲 → `/reflect` 在提纲后亲笔写复盘。
 7. `/events` 看黑板事件，`/dispatch` 处理第一条。
 
 每个流程命令会开一个新的 pi 会话并以角色命名，`/resume` 可以回到任一会话继续。当前会话尚无消息时则原地进入角色。
 
-`/accept` 不带参数时取最近一份尚未接受的提案（按修改时间），接受后文件改名为 `*.accepted.json`，不会被重复合并；要接受某一份指定提案，`/accept blackboard/proposals/<文件>`。
+`/accept` 不带参数时取最近一份尚未接受的提案（按修改时间），接受后文件改名为 `*.accepted.json`，不会被重复合并；要接受某一份指定提案，`/accept blackboard/proposals/<文件>`。黑板文件仍是普通的 JSON 与 Markdown，想直接看或直接改随时可以，只是不必。
 
 ## 无人值守出题
 
@@ -58,7 +60,7 @@ npm install --ignore-scripts    # 安装 pi 及其类型定义（devDependencies
 npm run check                   # tsc --strict + node --test
 ```
 
-测试（`tests/`）不调用模型：`workflow.test.ts` 用伪造的 ExtensionAPI 跑通五个流程（规划提案与接受、资料提案与接受、陪读会话的预问题、闭卷作答、术语表、证据与状态迁移、评审、出题、作答、批改与升降级、校准、事件分发、增量重规划、会话切换交接与恢复、护栏），断言黑板文件与状态；`load.test.ts` 用 pi 自己的加载器加载扩展；`scripts.test.ts` 检验定时出题的判定。改动扩展后在 pi 里 `/reload` 即可生效；也可以直接让 pi 修改它自己的扩展（无角色时 pi 是普通编码助手）。
+测试（`tests/`）不调用模型：`workflow.test.ts` 用伪造的 ExtensionAPI 跑通五个流程（入学访谈、规划提案与接受、资料提案与接受、资料核验、陪读会话的预问题、闭卷作答、术语表、证据与状态迁移、评审、出题、作答、批改与升降级、校准、事件分发、增量重规划、会话切换交接与恢复、护栏），断言黑板文件与状态；`load.test.ts` 用 pi 自己的加载器加载扩展；`scripts.test.ts` 检验定时出题的判定。改动扩展后在 pi 里 `/reload` 即可生效；也可以直接让 pi 修改它自己的扩展（无角色时 pi 是普通编码助手）。
 
 ## 目录
 
@@ -69,7 +71,7 @@ IMPLEMENTATION-PLAN.md            设计与实现方案
 .pi/extensions/learning/
   index.ts                        入口：会话生命周期、系统提示与上下文注入、工具护栏
   state.ts                        会话级状态、持久化、会话切换交接
-  roles.ts                        五个角色的提示、工具白名单、上下文装配、开场语
+  roles.ts                        六个角色的提示、工具白名单、上下文装配、开场语
   tools.ts                        bb_* 工具（模型改写黑板的唯一入口）
   blackboard.ts                   黑板 I/O、状态机、复习调度、事件、错误日志
   commands.ts                     斜杠命令与学习者侧对话框

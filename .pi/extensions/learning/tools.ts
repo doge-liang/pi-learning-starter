@@ -57,6 +57,48 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
 		},
 	});
 
+	// ------------------------------------------------------------------ 学习顾问（入学访谈）
+	pi.registerTool({
+		name: "bb_domain_set",
+		label: "写入学习者画像",
+		description:
+			"入学访谈结束时写入 blackboard/domain.json：领域、可检验的目标、背景、每周小时数、语言、资料偏好。已有字段按提交内容覆盖，未提交的字段保留。写入前学习者在对话框里最终确认。",
+		parameters: Type.Object({
+			domain: Type.String({ description: "领域，一句话" }),
+			goal: Type.String({ description: "可检验的目标：学完后能独立做到什么" }),
+			background: Type.String({ description: "已有知识与经验" }),
+			weekly_hours: Type.Number({ minimum: 0, description: "每周可投入小时数" }),
+			language: Type.String({ description: "对话与资料语言，如 zh / en" }),
+			preferences: Type.Optional(
+				Type.Object({
+					formats: Type.Optional(Type.Array(Type.String(), { description: "textbook / paper / course / code / video / doc / blog" })),
+					languages: Type.Optional(Type.Array(Type.String(), { description: "可接受的资料语言" })),
+					notes: Type.Optional(Type.String({ description: "其他偏好或限制" })),
+				}),
+			),
+		}),
+		executionMode: "sequential",
+		async execute(_id, params, _signal, _onUpdate, ctx) {
+			requireRole(deps.state(), "intake");
+			const summary = [
+				`领域：${params.domain}`,
+				`目标：${params.goal}`,
+				`背景：${params.background}`,
+				`每周 ${params.weekly_hours} 小时；语言 ${params.language}`,
+				params.preferences ? `偏好：${JSON.stringify(params.preferences)}` : "",
+			]
+				.filter(Boolean)
+				.join("\n");
+			const ok = ctx.hasUI ? await ctx.ui.confirm("写入 domain.json？", summary) : true;
+			if (!ok) return text("学习者未确认写入。请根据学习者的补充修改后重新提交 bb_domain_set。");
+			bb.saveDomain(params);
+			const state = deps.state();
+			state.contextHash = undefined;
+			deps.persist();
+			return text("已写入 blackboard/domain.json。请告诉学习者下一步运行 /plan 开始规划。");
+		},
+	});
+
 	// ------------------------------------------------------------------ 领域专家
 	pi.registerTool({
 		name: "bb_plan_propose",
@@ -94,7 +136,12 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
 			}
 			if (hasCycle(params.concepts)) throw new Error("前置关系存在环，请修正后重新提交");
 			const path = bb.writeProposal("plan", params);
-			return text(`提案已写入 ${path}：${params.concepts.length} 个概念，${params.units.length} 个单元。请告知学习者审阅后运行 /accept。`);
+			const summary = bb.summarizeProposal(params as { concepts: Concept[]; units: Unit[]; notes: string });
+			return text(`提案已写入 ${path}。
+
+${summary}
+
+请把上面的摘要转述给学习者：如需调整，学习者直接在本会话说明，你修改后重新调用 bb_plan_propose；满意后学习者运行 /accept。`);
 		},
 	});
 
@@ -122,7 +169,12 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
 		async execute(_id, params) {
 			requireRole(deps.state(), "librarian");
 			const path = bb.writeProposal("sources", params);
-			return text(`提案已写入 ${path}：${params.sources.length} 份资料。请告知学习者核对后运行 /accept，并亲自打开资料确认后把 verified 改为 true。`);
+			const summary = bb.summarizeProposal(params as { sources: Source[] });
+			return text(`提案已写入 ${path}。
+
+${summary}
+
+请把上面的摘要转述给学习者：如需调整，学习者直接在本会话说明，你修改后重新调用 bb_sources_propose；满意后学习者运行 /accept，并在亲自打开每份资料后运行 /verify <资料id> 标记已核验。`);
 		},
 	});
 
@@ -483,7 +535,7 @@ export function applyProposal(bb: Blackboard, file: string): string {
 	let summary: string;
 	if (Array.isArray((data as { sources?: unknown }).sources)) {
 		const n = acceptSources(bb, data as { sources: Source[] });
-		summary = `已写入 sources.json（共 ${n} 份）并挂到单元上。请亲自打开资料，确认后把 verified 改为 true。`;
+		summary = `已写入 sources.json（共 ${n} 份）并挂到单元上。请亲自打开每份资料，确认后运行 /verify <资料id>。`;
 	} else if (Array.isArray((data as { units?: unknown }).units)) {
 		const r = acceptPlan(bb, data as { concepts?: Concept[]; units?: Unit[]; notes?: string });
 		summary = `已写入 concepts.json（${r.concepts} 个概念）与 path.json（${r.units} 个单元），并发出 structure_ready 事件。`;
