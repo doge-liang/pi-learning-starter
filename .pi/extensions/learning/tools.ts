@@ -95,7 +95,95 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
 			const state = deps.state();
 			state.contextHash = undefined;
 			deps.persist();
-			return text("已写入 blackboard/domain.json。请告诉学习者下一步运行 /plan 开始规划。");
+			return text("已写入 blackboard/domain.json。请告诉学习者下一步：建议先运行 /placement 做入学水平测试（规划者会据测得的基线定起点），也可以直接运行 /plan。");
+		},
+	});
+
+	// ------------------------------------------------------------------ 水平测试官（入学诊断）
+	pi.registerTool({
+		name: "bb_placement_create",
+		label: "写入水平测试",
+		description: "水平测试官写入一次入学诊断测试到 blackboard/placement/pending-*.json；学习者随后用 /take 闭卷作答。每题带考察领域（area）与难度层级。",
+		parameters: Type.Object({
+			areas: Type.Array(Type.Object({ area: Type.String({ description: "考察领域名，如 线性代数 / Python / 体系结构-缓存" }), why: Type.String({ description: "为什么目标预设这一领域" }) }), { minItems: 1, maxItems: 8 }),
+			items: Type.Array(
+				Type.Object({
+					id: Type.String({ description: "如 p1" }),
+					area: Type.String({ description: "所属领域名，须与 areas 中一致" }),
+					level: StringEnum(["basic", "intermediate", "advanced"] as const),
+					type: StringEnum(["recall", "discriminate", "apply"] as const),
+					question: Type.String(),
+					reference: Type.String({ description: "参考答案" }),
+					rubric: Type.String({ description: "评分要点" }),
+				}),
+				{ minItems: 1, maxItems: 30 },
+			),
+		}),
+		executionMode: "sequential",
+		async execute(_id, params) {
+			requireRole(deps.state(), "placement");
+			const areaNames = new Set(params.areas.map((a) => a.area));
+			for (const it of params.items) if (!areaNames.has(it.area)) throw new Error(`题目 ${it.id} 的领域 ${it.area} 不在 areas 中`);
+			const rel = `placement/pending-${stamp()}.json`;
+			bb.writeJson(rel, { date: today(), kind: "placement", areas: params.areas, items: params.items });
+			return text(`水平测试已写入 ${rel}（${params.items.length} 题，${params.areas.length} 个领域）。请告诉学习者运行 /take 闭卷作答；不要在对话中透露参考答案。`);
+		},
+	});
+
+	pi.registerTool({
+		name: "bb_placement_grade",
+		label: "提交水平测试批改",
+		description:
+			"水平测试官提交逐题评分、各领域到达层级、优势与缺口、给规划者的建议。工具按领域聚合得分，写入 blackboard/placement/*-result.json，并把结论写进 domain.json 的 placement 字段；不改任何掌握度。",
+		parameters: Type.Object({
+			grades: Type.Array(Type.Object({ id: Type.String(), score: Type.Number({ minimum: 0, maximum: 1, description: "1、0.5 或 0" }), comment: Type.String() })),
+			by_area: Type.Array(Type.Object({ area: Type.String(), level_reached: StringEnum(["none", "basic", "intermediate", "advanced"] as const), note: Type.String() })),
+			strengths: Type.Array(Type.String()),
+			gaps: Type.Array(Type.String({ description: "前置缺口；规划者会为此插入补救单元" })),
+			recommendations: Type.String({ description: "给规划者：从哪里起步、可跳过什么、第一个单元难度如何定；以及对学习者校准的观察" }),
+		}),
+		executionMode: "sequential",
+		async execute(_id, params) {
+			const state = deps.state();
+			requireRole(state, "placement");
+			if (!state.testFile || !state.testFile.startsWith("placement/") || !state.responses.length) {
+				throw new Error("尚未收集学习者作答：请学习者先运行 /take 闭卷作答水平测试，再进行批改。");
+			}
+			const test = bb.readJson<{ items: Array<{ id: string; area: string; level: string }> }>(state.testFile, { items: [] });
+			const grades = new Map(params.grades.map((g) => [g.id, g]));
+			const levelOf = new Map(params.by_area.map((a) => [a.area, a]));
+			// 规则在代码：按领域聚合得分；层级判断由模型给出，分数由工具算
+			const byArea = new Map<string, number[]>();
+			for (const it of test.items) byArea.set(it.area, [...(byArea.get(it.area) ?? []), Number(grades.get(it.id)?.score ?? 0)]);
+			const areaRows = [...byArea].map(([area, scores]) => ({
+				area,
+				score: round3(scores.reduce((a, b) => a + b, 0) / scores.length),
+				items: scores.length,
+				level_reached: levelOf.get(area)?.level_reached ?? "none",
+				note: levelOf.get(area)?.note,
+			}));
+			const all = test.items.map((it) => Number(grades.get(it.id)?.score ?? 0));
+			const overall = all.length ? round3(all.reduce((a, b) => a + b, 0) / all.length) : 0;
+			const conf = state.responses.map((r) => (r.confidence - 1) / 4);
+			const scoreByResp = state.responses.map((r) => Number(grades.get(r.id)?.score ?? 0));
+			const gap = scoreByResp.length ? round3(conf.reduce((acc, c, i) => acc + (c - scoreByResp[i]), 0) / scoreByResp.length) : 0;
+
+			const resultRel = `placement/${stamp()}-result.json`;
+			bb.writeJson(resultRel, { date: today(), test: state.testFile, responses: state.responses, grades: params.grades, by_area: areaRows, overall, calibration_gap: gap, strengths: params.strengths, gaps: params.gaps, recommendations: params.recommendations });
+			bb.renamePending(state.testFile);
+			bb.saveDomain({ placement: { date: today(), overall, by_area: areaRows, strengths: params.strengths, gaps: params.gaps, recommendations: params.recommendations, result_file: resultRel } });
+
+			state.testFile = undefined;
+			state.responses = [];
+			state.contextHash = undefined;
+			deps.persist();
+			return text(
+				[
+					`结果已写入 ${resultRel}，结论已写入 domain.json 的 placement 字段；总分 ${overall}，校准偏差 ${gap}（正值为过度自信）。`,
+					`各领域：${areaRows.map((a) => `${a.area} ${a.score}（${a.level_reached}）`).join("；")}。`,
+					`请向学习者说明结果与下一步：运行 /plan，规划者会据此定起点。`,
+				].join("\n"),
+			);
 		},
 	});
 

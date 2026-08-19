@@ -20,6 +20,7 @@ export const COMMAND_GROUPS: CommandGroup[] = [
 		commands: [
 			{ name: "learn", label: "概览", hint: "黑板概览：掌握度、当前单元、到期复习、事件" },
 			{ name: "domain", label: "入学访谈", hint: "学习顾问通过对话整理领域、目标、背景与偏好" },
+			{ name: "placement", label: "水平测试", hint: "入学诊断：按画像出题定位起点，作答用「作答」", arg: { prompt: "题数上限（留空为 10）", placeholder: "10", optional: true } },
 			{ name: "plan", label: "规划", hint: "领域专家规划知识结构与学习路径", arg: { prompt: "参数（留空为首次规划；replan 增量重规划；revise 按评审意见修改）", placeholder: "replan / revise", optional: true } },
 			{ name: "critique", label: "评审提案", hint: "独立的提案评审员审查最近一份提案" },
 			{ name: "exemplar", label: "提供范例", hint: "粘贴课程大纲或良好实践供规划者参考", arg: { prompt: "范例名字", placeholder: "cs336-syllabus" } },
@@ -50,7 +51,7 @@ export const COMMAND_GROUPS: CommandGroup[] = [
 		title: "复盘",
 		commands: [
 			{ name: "assess", label: "出题", hint: "复盘老师生成一次闭卷检索测试", arg: { prompt: "题数上限（留空为 8）", placeholder: "8", optional: true } },
-			{ name: "take", label: "作答", hint: "闭卷作答最近一次测试并交给复盘老师批改" },
+			{ name: "take", label: "作答", hint: "闭卷作答最近一次测试（复盘测试或水平测试）并交给相应角色批改" },
 			{ name: "reflect", label: "写复盘", hint: "在复盘提纲后亲笔作答" },
 		],
 	},

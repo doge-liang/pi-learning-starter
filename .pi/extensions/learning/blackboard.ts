@@ -63,6 +63,15 @@ export interface Source {
 	verified?: boolean;
 	reachable?: boolean;
 }
+export interface PlacementSummary {
+	date: string;
+	overall: number;
+	by_area: Array<{ area: string; score: number; items: number; level_reached: string; note?: string }>;
+	strengths: string[];
+	gaps: string[];
+	recommendations: string;
+	result_file: string;
+}
 export interface Domain {
 	domain?: string;
 	goal?: string;
@@ -70,6 +79,8 @@ export interface Domain {
 	weekly_hours?: number;
 	language?: string;
 	preferences?: Record<string, unknown>;
+	/** 入学水平测试的结论（bb_placement_grade 写入；规划者据此定起点） */
+	placement?: PlacementSummary;
 }
 export interface ErrorRow {
 	ts: string;
@@ -362,13 +373,16 @@ export class Blackboard {
 		const unit = this.nextUnit();
 		const ev = this.unhandledEvents();
 		const pending = this.listFiles("assessments", "pending-", ".json");
+		const pendingPlacement = this.listFiles("placement", "pending-", ".json");
 		return [
 			`领域：${this.domain().domain ?? "（未设置，运行 /domain 开始入学访谈）"}`,
+			this.domain().domain ? `水平测试：${this.domain().placement ? `${this.domain().placement!.date} 总分 ${this.domain().placement!.overall}` : "未做（运行 /placement）"}` : "",
 			`掌握度：${LEVELS.map((lv) => `${lv} ${counts[lv]}`).join("  ")}`,
 			unit ? `当前单元：${unit.id} ${unit.title}（${unit.status ?? "pending"}）` : "当前单元：无（先运行 /plan）",
 			`到期复习概念：${this.dueConcepts().length}　未解决错误：${this.unresolvedErrors().length}`,
 			`未处理事件：${ev.length}${ev.length ? "　→ " + ev.map((e) => e.type).join(", ") : ""}`,
 			pending.length ? `待作答的测试：${pending[pending.length - 1]}（运行 /take）` : "",
+			pendingPlacement.length ? `待作答的水平测试：${pendingPlacement[pendingPlacement.length - 1]}（运行 /take）` : "",
 		]
 			.filter(Boolean)
 			.join("\n");

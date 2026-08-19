@@ -51,10 +51,10 @@ describe("学习工作流（全流程）", () => {
 	});
 	after(() => project.cleanup());
 
-	it("注册了 11 个 bb_* 工具、22 个命令与 4 个事件处理器", () => {
+	it("注册了 13 个 bb_* 工具、23 个命令与 4 个事件处理器", () => {
 		const bbTools = [...pi.tools.keys()].filter((n) => n.startsWith("bb_"));
-		assert.equal(bbTools.length, 11, bbTools.join(","));
-		assert.equal(pi.commands.size, 22, [...pi.commands.keys()].join(","));
+		assert.equal(bbTools.length, 13, bbTools.join(","));
+		assert.equal(pi.commands.size, 23, [...pi.commands.keys()].join(","));
 		assert.deepEqual([...pi.handlers.keys()].sort(), ["before_agent_start", "input", "session_start", "tool_call"]);
 	});
 
@@ -108,6 +108,68 @@ describe("学习工作流（全流程）", () => {
 			await pi.command("domain").handler("", ctx);
 			assert.match(pi.lastMessage(), /已有内容/);
 		});
+
+		it("/placement 进入水平测试官；bb_placement_create 写 pending；领域不一致被拒", async () => {
+			pi.sentMessages.length = 0;
+			await pi.command("placement").handler("6", ctx);
+			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.placement.tools]);
+			assert.match(pi.lastMessage(), /phase=generate。题数上限 6/);
+			const ctxText = (await contextOf(pi, ctx))?.message?.content ?? "";
+			assert.ok(ctxText.includes("学习者画像（完整）") && ctxText.includes("深度学习框架内部原理"));
+			await assert.rejects(
+				pi.tool("bb_placement_create").execute("t", { areas: [{ area: "Python", why: "x" }], items: [{ id: "p1", area: "C++", level: "basic", type: "recall", question: "q", reference: "r", rubric: "k" }] }),
+				/不在 areas 中/,
+			);
+			const r = await pi.tool("bb_placement_create").execute("t", {
+				areas: [
+					{ area: "Python", why: "读框架源码的前提" },
+					{ area: "微积分", why: "自动微分依赖链式法则" },
+				],
+				items: [
+					{ id: "p1", area: "Python", level: "basic", type: "recall", question: "列表与元组的区别？", reference: "可变性", rubric: "提到可变/不可变" },
+					{ id: "p2", area: "Python", level: "intermediate", type: "apply", question: "写一个装饰器记录函数调用次数", reference: "闭包+计数", rubric: "闭包、wraps" },
+					{ id: "p3", area: "微积分", level: "basic", type: "recall", question: "写出复合函数求导的链式法则", reference: "(f∘g)' = f'(g)·g'", rubric: "形式正确" },
+					{ id: "p4", area: "微积分", level: "advanced", type: "apply", question: "对 y = softmax(Wx) 的标量损失求 W 的梯度形状并说明", reference: "与 W 同形", rubric: "形状正确、说明外积" },
+				],
+			});
+			assert.match(r.content[0].text, /4 题，2 个领域/);
+			assert.ok(readdirFirst(join(bbDir, "placement"), ".json", "pending-"));
+			assert.match(readJsonEntries(join(bbDir, "placement"))[0].kind, /placement/);
+		});
+
+		it("/take 识别水平测试：收集作答后发 [grade-placement]；bb_placement_grade 聚合、写 domain.placement、不动掌握度", async () => {
+			uiScript.editor.push("元组不可变", "不会", "dy/dx = f'(g(x))·g'(x)", "不知道");
+			uiScript.select.push("5", "2", "4", "1");
+			pi.sentMessages.length = 0;
+			await pi.command("take").handler("", ctx);
+			assert.match(pi.lastMessage(), /^\[grade-placement\]/);
+			const ctxText = (await contextOf(pi, ctx))?.message?.content ?? "";
+			assert.ok(ctxText.includes("待批改的水平测试") && ctxText.includes("装饰器"));
+			const r = await pi.tool("bb_placement_grade").execute("t", {
+				grades: [
+					{ id: "p1", score: 1, comment: "正确" },
+					{ id: "p2", score: 0, comment: "空白" },
+					{ id: "p3", score: 1, comment: "正确" },
+					{ id: "p4", score: 0, comment: "空白" },
+				],
+				by_area: [
+					{ area: "Python", level_reached: "basic", note: "基础扎实，缺闭包与装饰器" },
+					{ area: "微积分", level_reached: "basic", note: "会链式法则，矩阵微分未涉及" },
+				],
+				strengths: ["Python 基础", "链式法则"],
+				gaps: ["Python 闭包与装饰器", "矩阵微分"],
+				recommendations: "第一单元从计算图直接开始；在反向传播前插入矩阵微分补救单元；Python 装饰器可在读源码时顺带补。",
+			});
+			assert.match(r.content[0].text, /总分 0\.5/);
+			assert.match(r.content[0].text, /Python 0\.5（basic）；微积分 0\.5（basic）/);
+			const d = readJson(join(bbDir, "domain.json"));
+			assert.equal(d.placement.overall, 0.5);
+			assert.deepEqual(d.placement.gaps, ["Python 闭包与装饰器", "矩阵微分"]);
+			assert.equal(d.domain, "深度学习框架内部原理", "其余字段保留");
+			assert.equal(readdirFirst(join(bbDir, "placement"), ".json", "pending-"), undefined, "pending 改名为 taken");
+			assert.ok(readdirFirst(join(bbDir, "placement"), "-result.json"));
+			assert.equal(readJson(join(bbDir, "concepts.json")).concepts.length, 0, "不创建概念、不动掌握度");
+		});
 	});
 
 	// ------------------------------------------------------------ 流程 A：规划
@@ -128,6 +190,7 @@ describe("学习工作流（全流程）", () => {
 			assert.ok(r1?.message?.content.includes("# 黑板上下文"));
 			assert.ok(r1?.message?.content.includes("深度学习框架内部原理"));
 			assert.ok(r1?.message?.content.includes("规划范例（结构示范") && r1?.message?.content.includes("limited-direct-execution"), "首次规划注入自带范例");
+			assert.ok(r1?.message?.content.includes("水平测试结果") && r1?.message?.content.includes("矩阵微分"), "规划者看到水平测试结论");
 			assert.ok(!r1?.message?.content.includes("学习者提供的范例"), "尚无学习者范例");
 			const r2 = await contextOf(pi, ctx);
 			assert.equal(r2?.message, undefined);
@@ -720,6 +783,12 @@ function readdirFirst(dir: string, suffix: string, prefix = ""): string | undefi
 	return readdirSync(dir)
 		.filter((f) => f.endsWith(suffix) && f.startsWith(prefix))
 		.sort()[0];
+}
+function readJsonEntries(dir: string): any[] {
+	return readdirSync(dir)
+		.filter((f) => f.endsWith(".json"))
+		.sort()
+		.map((f) => readJson(join(dir, f)));
 }
 function mustFind(dir: string, suffix: string, prefix = ""): string {
 	const f = readdirFirst(dir, suffix, prefix);

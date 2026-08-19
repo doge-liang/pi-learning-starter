@@ -20,3 +20,5 @@ blackboard/artifacts/reviews/*
 !blackboard/artifacts/reviews/.gitkeep
 blackboard/exemplars/*
 !blackboard/exemplars/.gitkeep
+blackboard/placement/*
+!blackboard/placement/.gitkeep

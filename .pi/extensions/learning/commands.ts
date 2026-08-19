@@ -4,7 +4,7 @@
  * 角色会话的隔离靠 pi 的会话：/plan、/sources、/read、/review、/assess 会通过 ctx.newSession 切到新会话，
  * 目标角色通过交接文件传给新的扩展实例（见 state.ts）。当前会话尚无消息时则直接在原地进入角色。
  */
-import { existsSync, readFileSync } from "node:fs";
+import { existsSync, readFileSync, statSync } from "node:fs";
 import { resolve } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
 import { type Blackboard, today } from "./blackboard.ts";
@@ -275,29 +275,54 @@ export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
 		},
 	});
 
-	pi.registerCommand("take", {
-		description: "闭卷作答最近一次（或指定的）测试，然后交给复盘老师批改",
+	pi.registerCommand("placement", {
+		description: "水平测试官：入学诊断测试，按画像出题定位起点；/placement [题数上限]；作答用 /take",
 		handler: async (args, ctx) => {
-			const pending = bb.listFiles("assessments", "pending-", ".json");
-			const rel = args.trim() ? `assessments/${args.trim().replace(/^.*assessments[\\/]/, "")}` : pending.length ? `assessments/${pending[pending.length - 1]}` : undefined;
-			if (!rel || !existsSync(bb.path(rel))) return ctx.ui.notify("没有待作答的测试；先运行 /assess。", "warning");
-			const test = bb.readJson<{ items: Array<{ id: string; type: string; concept: string; question: string }> }>(rel, { items: [] });
+			if (!bb.domain().domain) return ctx.ui.notify("还没有学习者画像；请先运行 /domain 完成入学访谈。", "warning");
+			const maxItems = Number.parseInt(args.trim(), 10) || 10;
+			await enter(ctx, "placement", {}, `placement generate ${today()}`, kickoff("placement", { maxItems }));
+		},
+	});
+
+	pi.registerCommand("take", {
+		description: "闭卷作答最近一次（或指定的）测试——复盘测试交给复盘老师、水平测试交给水平测试官批改",
+		handler: async (args, ctx) => {
+			// 待作答的测试可能在 assessments/（复盘）或 placement/（入学诊断）；取最近写入的一份
+			let rel: string | undefined;
+			const arg = args.trim();
+			if (arg) {
+				const base = arg.replace(/^.*[\\/]/, "");
+				rel = arg.includes("placement") ? `placement/${base}` : `assessments/${base}`;
+			} else {
+				const candidates = [
+					...bb.listFiles("assessments", "pending-", ".json").map((f) => `assessments/${f}`),
+					...bb.listFiles("placement", "pending-", ".json").map((f) => `placement/${f}`),
+				];
+				candidates.sort((a, b) => statSync(bb.path(a)).mtimeMs - statSync(bb.path(b)).mtimeMs);
+				rel = candidates[candidates.length - 1];
+			}
+			if (!rel || !existsSync(bb.path(rel))) return ctx.ui.notify("没有待作答的测试；先运行 /assess（复盘）或 /placement（水平测试）。", "warning");
+			const isPlacement = rel.startsWith("placement/");
+			const test = bb.readJson<{ items: Array<{ id: string; type: string; concept?: string; area?: string; level?: string; question: string }> }>(rel, { items: [] });
 			const responses = await collect(
 				ctx,
-				test.items.map((it) => ({ id: it.id, prompt: `[${it.id} · ${it.type} · ${it.concept}]\n${it.question}` })),
-				"闭卷作答：不要翻资料，不要查术语表。",
+				test.items.map((it) => ({ id: it.id, prompt: `[${it.id} · ${it.type} · ${isPlacement ? `${it.area} · ${it.level}` : it.concept}]\n${it.question}` })),
+				isPlacement ? "水平测试，闭卷作答：不确定就写不知道，这是为了定位起点，不是考核。" : "闭卷作答：不要翻资料，不要查术语表。",
 			);
 			if (!responses) return;
 			const state = deps.state();
-			const msg = `[grade] 学习者已完成测试 ${rel}。作答如下（含信心 1–5）：\n${JSON.stringify(responses, null, 1)}\n请按 rubric 逐题评分并调用 bb_grade。`;
-			if (state.role === "assessor") {
+			const role = isPlacement ? "placement" : "assessor";
+			const msg = isPlacement
+				? `[grade-placement] 学习者已完成水平测试 ${rel}。作答如下（含信心 1–5）：\n${JSON.stringify(responses, null, 1)}\n请按 rubric 逐题评分并调用 bb_placement_grade。`
+				: `[grade] 学习者已完成测试 ${rel}。作答如下（含信心 1–5）：\n${JSON.stringify(responses, null, 1)}\n请按 rubric 逐题评分并调用 bb_grade。`;
+			if (state.role === role) {
 				state.testFile = rel;
 				state.responses = responses;
 				state.contextHash = undefined;
 				deps.persist();
 				pi.sendUserMessage(msg);
 			} else {
-				await enter(ctx, "assessor", { testFile: rel, responses }, `assessor grade ${today()}`, msg);
+				await enter(ctx, role, { testFile: rel, responses }, `${role} grade ${today()}`, msg);
 			}
 		},
 	});

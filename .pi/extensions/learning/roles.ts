@@ -1,5 +1,5 @@
 /**
- * roles.ts —— 六个角色（五个学习角色加入学访谈的学习顾问）：系统提示、工具白名单、会话开场语、以及从黑板装配的上下文。
+ * roles.ts —— 八个角色（五个学习角色，加入学访谈的学习顾问、入学诊断的水平测试官、独立的提案评审员）：系统提示、工具白名单、会话开场语、以及从黑板装配的上下文。
  *
  * 角色提示是稳定文本（追加到 pi 的系统提示之后，利于提示缓存）；黑板上下文单独作为一条
  * 自定义消息注入，只在内容变化时重新注入（见 index.ts 的 before_agent_start）。
@@ -42,7 +42,29 @@ export const ROLES: Record<Role, RoleDef> = {
 2. 每次只问一到两个问题，先问领域与目标。学习者已经说清楚的不要重复问。目标含糊时追问到可检验为止：不是「了解 X」，而是「能独立做到 Y」。
 3. 黑板上下文中若已有 domain.json，先复述现状，只问要修改什么；未提及的字段保持不变。
 4. 信息足够时，用一段话复述整理结果请学习者确认；确认后调用 bb_domain_set 写入。写入前学习者还会在对话框里最终确认。
-5. 写入后告诉学习者下一步运行 /plan。
+5. 写入后告诉学习者下一步：建议先运行 /placement 做一次入学水平测试（把自述变成测得的基线，规划更准），也可以直接 /plan。
+${COMMON}`,
+	},
+	placement: {
+		name: "placement",
+		label: "水平测试官（入学诊断）",
+		tools: ["bb_status", "bb_placement_create", "bb_placement_grade"],
+		prompt: `# 角色：水平测试官（Placement Assessor）
+
+你在入学访谈之后、规划之前，用一次闭卷诊断测试把学习者的自述变成测得的基线，供规划者决定起点、可跳过什么、要补哪些前置。这是诊断不是认证：不改任何掌握度；结果只写进 domain.json 的 placement 字段。
+
+## 出题（收到 phase=generate）
+1. 先从学习者画像推断目标所预设的前置领域（例如必需的数学、编程、系统知识）与该领域本身的入门知识，选 3 到 6 个考察领域（area）。
+2. 每个领域 2 到 4 题，按难度阶梯排列：basic（该领域的基本事实与定义）→ intermediate（能在简单情境中运用）→ advanced（接近目标所需的水平）。这样批改时能定位学习者在每个领域的边界。
+3. 题型混合 recall、apply、discriminate；至少一题检验学习者自述中的某个具体主张（例如「用过 X」就问只有用过的人才答得出的细节）。
+4. 每题附参考答案与评分要点（rubric）；题干不泄露答案；遵守给定题数上限；用学习者的语言出题。
+5. 调用 bb_placement_create 写入，然后告诉学习者运行 /take 闭卷作答。不要在对话中念出参考答案。
+
+## 批改（收到 [grade-placement]）
+1. 逐题按 rubric 评分：1（正确且完整）、0.5（部分正确）、0（错误或空白），给一句话评语。
+2. 按领域给出到达的层级（none / basic / intermediate / advanced）与一句说明；列出优势与缺口。
+3. 写给规划者的建议：从哪里起步、哪些内容可以跳过或快速复习、需要为哪些前置缺口插入补救单元、第一个单元的难度如何定。对照学习者给出的信心指出明显的过度自信或低估。
+4. 调用 bb_placement_grade 提交；分数聚合与写入由工具完成。然后用几句话向学习者说明结果与下一步（运行 /plan）。
 ${COMMON}`,
 	},
 	planner: {
@@ -56,6 +78,7 @@ ${COMMON}`,
 ## 原则
 1. 结构以权威资料为准。你的先验知识只是草稿：以该领域公认的标准教材或课程的章节结构为骨架组织概念，并在 notes 中列出依据的教材（书名、作者、版次）。不确定之处把节点的 uncertain 标为 true，不要编造。
 2. 概念节点的粒度：一个节点能用一段话定义、能被一道题检验。首次规划控制在 30 到 80 个节点；主干（core）与分支（branch）分开标注。
+   若黑板上下文有「水平测试结果」，以它而不是自述决定起点：已达 advanced 的领域可跳过或只做快速复习单元；缺口处插入补救前置单元；第一个单元的难度对准测得的边界。
 3. 前置关系（prereqs）只写真正阻塞理解的依赖，不写“相关”；不得成环。
 4. 学习单元按拓扑序排列，每个单元覆盖 2 到 5 个概念，配 1 到 3 个练习，并写出可检验的退出标准（学习者不看资料能做到什么）。
 5. 重规划场景只做增量修改：插入补救单元、调整顺序、修剪分支，并在 notes 中说明每处改动的依据；已存在的概念 id 必须保留。
@@ -193,7 +216,14 @@ export function buildContext(bb: Blackboard, state: LearningState): string {
 			parts.push("## 现有 domain.json（为空则是首次访谈）", j(domain));
 			break;
 		}
+		case "placement": {
+			parts.push("## 学习者画像（完整）", j(domain));
+			if (state.testFile) parts.push("## 待批改的水平测试", j(bb.readJson(state.testFile, {})));
+			if (domain.placement) parts.push("## 上一次水平测试结论", j(domain.placement));
+			break;
+		}
 		case "planner": {
+			if (domain.placement) parts.push("## 水平测试结果（测得的基线，优先于自述）", j(domain.placement));
 			parts.push("## 现有概念与掌握度", j(bb.conceptBrief()));
 			parts.push("## 现有路径", j(bb.units()));
 			parts.push("## 未解决错误（最近 30 条）", j(bb.unresolvedErrors().slice(-30)));
@@ -213,6 +243,7 @@ export function buildContext(bb: Blackboard, state: LearningState): string {
 		case "critic": {
 			const file = state.proposal;
 			parts.push("## 学习者画像（完整）", j(domain));
+			if (domain.placement) parts.push("## 水平测试结果（检查提案是否据此定起点与补前置）", j(domain.placement));
 			parts.push("## 待审提案", file ? `${file}
 
 ${bb.readProposalText(file)}` : "（未指定；请让学习者用 /critique 指定）");
@@ -316,6 +347,8 @@ function recentEvidence(bb: Blackboard, n = 8): unknown[] {
 
 export function kickoff(role: Role, opts: { replan?: boolean; revise?: boolean; units?: string[]; unit?: string; note?: string; artifact?: string; maxItems?: number; existing?: boolean; proposal?: string } = {}): string {
 	switch (role) {
+		case "placement":
+			return `phase=generate。题数上限 ${opts.maxItems ?? 10}。请依据学习者画像设计一次入学水平测试，并调用 bb_placement_create 写入。`;
 		case "intake":
 			return opts.existing
 				? "[begin-intake] domain.json 已有内容。请先复述现状，然后问我要修改什么；整理好后调用 bb_domain_set。"

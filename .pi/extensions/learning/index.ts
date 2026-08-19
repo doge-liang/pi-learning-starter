@@ -104,9 +104,11 @@ export default function (pi: ExtensionAPI) {
 			pi.setActiveTools(nonBlackboardTools(pi.getActiveTools()));
 			if (event.reason === "startup" && ctx.hasUI && bb.exists()) {
 				ctx.ui.notify(
-					bb.domain().domain
-						? "学习工作流已加载：/learn 查看黑板；/plan、/sources、/read、/review、/assess 进入各角色。"
-						: "学习工作流已加载：先运行 /domain 做入学访谈，再 /plan 规划。",
+					!bb.domain().domain
+						? "学习工作流已加载：先运行 /domain 做入学访谈，再 /placement 水平测试，再 /plan 规划。"
+						: !bb.domain().placement && bb.concepts().length === 0
+							? "学习工作流已加载：画像已有；建议 /placement 做水平测试，再 /plan 规划。"
+							: "学习工作流已加载：/learn 查看黑板；/plan、/sources、/read、/review、/assess 进入各角色。",
 					"info",
 				);
 			}

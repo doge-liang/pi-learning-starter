@@ -10,8 +10,8 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { join } from "node:path";
 import { CONFIG_DIR_NAME, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-export type Role = "intake" | "planner" | "critic" | "librarian" | "tutor" | "reviewer" | "assessor";
-export const ROLE_NAMES: Role[] = ["intake", "planner", "critic", "librarian", "tutor", "reviewer", "assessor"];
+export type Role = "intake" | "placement" | "planner" | "critic" | "librarian" | "tutor" | "reviewer" | "assessor";
+export const ROLE_NAMES: Role[] = ["intake", "placement", "planner", "critic", "librarian", "tutor", "reviewer", "assessor"];
 
 export interface PreQuestion {
 	id: string;
@@ -34,7 +34,7 @@ export interface LearningState {
 	prequestions: PreQuestion[];
 	/** /answer 收集的闭卷作答（含信心），由 bb_evidence 合并进证据 */
 	answers: LearnerAnswer[];
-	/** 复盘：/take 收集的作答与所属测试文件（相对 blackboard/） */
+	/** 复盘或水平测试：/take 收集的作答与所属测试文件（相对 blackboard/，assessments/ 或 placement/ 下） */
 	testFile?: string;
 	responses: LearnerAnswer[];
 	/** 评审：产出物路径 */
