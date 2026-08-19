@@ -1,0 +1,21 @@
+{
+  "name": "obsidian-pi-learning",
+  "version": "0.1.0",
+  "private": true,
+  "description": "把 pi 学习工作流（五个 Agent 与一块黑板）嵌入 Obsidian 侧边栏",
+  "type": "module",
+  "scripts": {
+    "dev": "node esbuild.config.mjs --watch",
+    "build": "tsc -p tsconfig.json && node esbuild.config.mjs",
+    "test": "node --test \"test/**/*.test.ts\"",
+    "check": "npm run build && npm test",
+    "install:vault": "node scripts/install-to-vault.mjs"
+  },
+  "devDependencies": {
+    "@types/node": "^24.0.0",
+    "builtin-modules": "^4.0.0",
+    "esbuild": "^0.25.0",
+    "obsidian": "^1.8.7",
+    "typescript": "^5.9.0"
+  }
+}

@@ -1,0 +1,10 @@
+{
+  "id": "pi-learning",
+  "name": "Pi Learning",
+  "version": "0.1.0",
+  "minAppVersion": "1.5.0",
+  "description": "把 pi 学习工作流（五个 Agent 与一块黑板）嵌入侧边栏：入学访谈、规划、选材、陪读、评审、复盘，黑板即文件。",
+  "author": "doge-liang",
+  "authorUrl": "https://github.com/doge-liang/pi-learning-starter",
+  "isDesktopOnly": true
+}

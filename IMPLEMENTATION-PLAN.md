@@ -109,7 +109,7 @@ E 调整路径：`replan_request` 事件 → `/dispatch` 或 `/plan replan` → 
 
 ## 7. 演进方向
 
-第一，把学习者的作答体验做成自定义组件（`ctx.ui.custom`）：一屏内显示题目、编辑器与信心条，替代逐题弹窗。第二，用 `renderResult` 给 `bb_evidence`、`bb_grade` 做卡片式渲染，让证据与批改结果在终端里可读。第三，利用 pi 的 `/tree` 与 `/fork`：闭卷作答前打标签，作答不满意可以分支重来而不污染主线。第四，把角色提示抽成 pi skills 或打包为 pi package（`pi install git:...`），在多台机器上复用。第五，若要 Web 界面，用 pi 的 RPC 或 SDK 模式把同一套扩展跑在服务端。第六，黑板超过几百个概念时再考虑 SQLite；此前文件方案更利于手改与 git 管理。
+第一，把学习者的作答体验做成自定义组件（`ctx.ui.custom`）：一屏内显示题目、编辑器与信心条，替代逐题弹窗。第二，用 `renderResult` 给 `bb_evidence`、`bb_grade` 做卡片式渲染，让证据与批改结果在终端里可读。第三，利用 pi 的 `/tree` 与 `/fork`：闭卷作答前打标签，作答不满意可以分支重来而不污染主线。第四，把角色提示抽成 pi skills 或打包为 pi package（`pi install git:...`），在多台机器上复用。第五，若要其他界面，用 pi 的 RPC 或 SDK 模式把同一套扩展跑在别处：`obsidian-plugin/` 已按此思路把 Agent 嵌进 Obsidian 侧边栏（子进程 `pi --mode rpc`，扩展 UI 子协议映射为 Obsidian 模态框）。第六，黑板超过几百个概念时再考虑 SQLite；此前文件方案更利于手改与 git 管理。
 
 ## 8. 已知限制与风险
 

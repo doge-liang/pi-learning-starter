@@ -51,6 +51,20 @@ schtasks /Create /SC WEEKLY /D MON,THU /ST 20:00 /TN "pi-learning assess" /TR "c
 
 `assess-cron.mjs` 依次尝试环境变量 `PI_BIN`、项目内安装的 pi（见下节）、PATH 上的 `pi`；`--force` 跳过判定直接出题，`--max <n>` 设题数上限。生成后下次 `/learn` 会提示待作答的测试。
 
+## Obsidian 插件（obsidian-plugin/）
+
+把同一套 Agent 嵌进 Obsidian 侧边栏：插件以子进程方式启动 `pi --mode rpc`（工作目录就是本项目），扩展的对话框（确认、选择、单行输入、多行编辑器）经 pi 的扩展 UI 子协议变成 Obsidian 的模态框，`/learn`、`/events` 的黑板输出以卡片显示，bb_* 工具调用默认展开作为回执。学习者在 Obsidian 里对角色说话、点命令条按钮，黑板文件仍在本项目目录（可作为第二个 vault 打开，或按需镜像到主库）。
+
+```
+cd obsidian-plugin
+npm install
+npm run build                                   # dist/main.js、manifest.json、styles.css
+node scripts/install-to-vault.mjs <vault 路径>   # 复制到 <vault>/.obsidian/plugins/pi-learning/
+npm test                                        # 对真实 pi（RPC 模式）测试客户端，不调用模型
+```
+
+在 Obsidian「设置 → 第三方插件」启用 Pi Learning，再到插件设置里填「学习项目目录」（本项目的绝对路径）；模型凭据由 pi 自己管理（终端里 `pi` 后 `/login`，或用户级环境变量），插件不保存任何密钥。侧边栏顶部显示角色、模型与会话名；命令条按流程分组（开始 / 阅读 / 产出 / 复盘 / 事件）。
+
 ## 开发与验证
 
 扩展由 pi 用 jiti 直接加载 TypeScript，运行不需要构建。仓库附带类型检查与测试，用于修改扩展后自检：
@@ -78,4 +92,5 @@ IMPLEMENTATION-PLAN.md            设计与实现方案
 blackboard/                       黑板
 scripts/                          定时出题脚本（sh 与 node 两版）
 tests/                            伪造 ExtensionAPI 的全流程测试、加载测试、脚本测试
+obsidian-plugin/                  Obsidian 插件：RPC 客户端、侧边栏视图、模态框、命令条
 ```
