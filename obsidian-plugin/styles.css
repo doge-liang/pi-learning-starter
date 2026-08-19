@@ -230,3 +230,16 @@
 	line-height: 1.6;
 	resize: vertical;
 }
+
+/* 顶栏模型：可点击切换 */
+.pi-learning-model-link {
+	cursor: pointer;
+	text-decoration: underline dotted;
+	text-underline-offset: 3px;
+}
+.pi-learning-model-link:hover {
+	color: var(--text-normal);
+}
+.pi-learning-model-missing {
+	color: var(--text-warning);
+}

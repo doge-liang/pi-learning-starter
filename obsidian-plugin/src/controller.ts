@@ -130,6 +130,43 @@ export class LearningController {
 		return this.requireClient().getMessages();
 	}
 
+	/** 弹出可用模型列表，选中即切换；记到设置里，下次启动沿用 */
+	async pickModel(): Promise<void> {
+		const client = this.requireClient();
+		const models = await client.getAvailableModels();
+		if (!models.length) {
+			new Notice("pi 没有可用模型：请在终端运行 pi 并 /login，或配置 API key 环境变量。", 8000);
+			return;
+		}
+		const current = this.state?.model ? `${this.state.model.provider}/${this.state.model.id}` : "";
+		const labels = models.map((m) => `${m.provider}/${m.id}${m.name && m.name !== m.id ? `  ${m.name}` : ""}`);
+		const picked = await selectModal(this.app, `选择模型（当前：${current || "无"}）`, labels);
+		if (!picked) return;
+		const m = models[labels.indexOf(picked)];
+		if (!m) return;
+		await client.setModel(m.provider, m.id);
+		this.onModelChosen?.(`${m.provider}/${m.id}`);
+		await this.refreshState();
+		new Notice(`已切换到 ${m.provider}/${m.id}`);
+	}
+
+	/** 弹出当前模型支持的思考等级 */
+	async pickThinkingLevel(): Promise<void> {
+		const client = this.requireClient();
+		const levels = await client.getAvailableThinkingLevels();
+		if (levels.length <= 1) {
+			new Notice("当前模型不支持调节思考等级。");
+			return;
+		}
+		const picked = await selectModal(this.app, `思考等级（当前：${this.state?.thinkingLevel ?? "?"}）`, levels);
+		if (!picked) return;
+		await client.setThinkingLevel(picked);
+		await this.refreshState();
+	}
+
+	/** 由插件注入：把用户在面板里选的模型写回设置 */
+	onModelChosen: ((model: string) => void) | null = null;
+
 	private requireClient(): PiRpcClient {
 		if (!this.client?.running) throw new Error("pi 未运行；请先启动。");
 		return this.client;

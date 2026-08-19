@@ -187,6 +187,12 @@ export class PiRpcClient {
 	async setModel(provider: string, modelId: string): Promise<void> {
 		this.data(await this.send({ type: "set_model", provider, modelId }));
 	}
+	async getAvailableThinkingLevels(): Promise<string[]> {
+		return this.data<{ levels: string[] }>(await this.send({ type: "get_available_thinking_levels" })).levels;
+	}
+	async setThinkingLevel(level: string): Promise<void> {
+		this.data(await this.send({ type: "set_thinking_level", level }));
+	}
 
 	// ---------- 入站 ----------
 

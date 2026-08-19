@@ -95,6 +95,21 @@ describe("PiRpcClient 对真实 pi", { skip: launch ? false : "本机找不到 p
 		await waitFor(() => uiRequests.some((r) => r.method === "setStatus" && r.statusKey === "learning" && (r.statusText === undefined || r.statusText === null)));
 	});
 
+	it("模型列表与切换、思考等级列表（本机无可用模型时只检查接口可用）", async () => {
+		const models = await client.getAvailableModels();
+		assert.ok(Array.isArray(models));
+		if (models.length) {
+			const m = models[0];
+			await client.setModel(m.provider, m.id);
+			const st = await client.getState();
+			assert.equal(st.model?.id, m.id);
+			assert.equal(st.model?.provider, m.provider);
+			const levels = await client.getAvailableThinkingLevels();
+			assert.ok(levels.length >= 1);
+			await client.setThinkingLevel(levels[0]);
+		}
+	});
+
 	it("stop 后 running 为 false，再次 send 抛错", async () => {
 		const c2 = new PiRpcClient({ command: launch!.command, commandArgs: launch!.args, cwd: project.cwd, args: ["-a", "--no-session"] });
 		await c2.start();

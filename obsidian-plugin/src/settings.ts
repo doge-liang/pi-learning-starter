@@ -2,7 +2,7 @@
  * settings.ts —— 插件设置：学习项目目录、pi 定位、模型、额外参数。
  * 不在这里保存任何密钥：模型凭据由 pi 自己管理（`pi` 里 `/login`，或环境变量）。
  */
-import { type App, PluginSettingTab, Setting } from "obsidian";
+import { type App, Notice, PluginSettingTab, Setting } from "obsidian";
 import type PiLearningPlugin from "./main.ts";
 
 export interface PiLearningSettings {
@@ -70,15 +70,23 @@ export class PiLearningSettingTab extends PluginSettingTab {
 					save();
 				}),
 		);
-		new Setting(containerEl).setName("模型").setDesc("传给 pi 的 --model，如 deepseek/deepseek-v4-pro；留空用 pi 的默认模型。各角色的模型仍可在项目的 .pi/learning.json 里分别配置。").addText((t) =>
-			t
-				.setPlaceholder("provider/model-id")
-				.setValue(s.model)
-				.onChange((v) => {
-					s.model = v.trim();
-					save();
+		new Setting(containerEl)
+			.setName("模型")
+			.setDesc("启动 pi 时的 --model，如 zai-coding-cn/glm-5.2；留空用 pi 的默认模型。面板顶栏点模型名也可随时切换（会写回这里）。各角色的模型仍可在项目的 .pi/learning.json 里分别配置。")
+			.addText((t) =>
+				t
+					.setPlaceholder("provider/model-id")
+					.setValue(s.model)
+					.onChange((v) => {
+						s.model = v.trim();
+						save();
+					}),
+			)
+			.addButton((b) =>
+				b.setButtonText("从列表选择").onClick(() => {
+					void this.plugin.controller.pickModel().then(() => this.display()).catch((e: Error) => new Notice(e.message));
 				}),
-		);
+			);
 		new Setting(containerEl).setName("额外参数").setDesc("追加给 pi 的命令行参数，例如 --thinking high。").addText((t) =>
 			t.setValue(s.extraArgs).onChange((v) => {
 				s.extraArgs = v;

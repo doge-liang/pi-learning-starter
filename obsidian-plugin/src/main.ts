@@ -15,6 +15,11 @@ export default class PiLearningPlugin extends Plugin {
 	async onload(): Promise<void> {
 		await this.loadSettings();
 		this.controller = new LearningController(this.app, () => this.settings);
+		// 面板里切换的模型写回设置，下次启动 pi 时作为 --model 沿用
+		this.controller.onModelChosen = (model) => {
+			this.settings.model = model;
+			void this.saveSettings();
+		};
 
 		this.registerView(VIEW_TYPE, (leaf: WorkspaceLeaf) => new LearningView(leaf, this.controller, () => this.settings.autoStart));
 		this.addRibbonIcon("graduation-cap", "打开 Pi Learning", () => void this.activateView());

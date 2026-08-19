@@ -49,6 +49,8 @@ export class LearningView extends ItemView implements ControllerSurface {
 		this.statusEl = header.createDiv({ cls: "pi-learning-status" });
 		const ctl = header.createDiv({ cls: "pi-learning-controls" });
 		this.startBtn = this.iconButton(ctl, "play", "启动 / 重启 pi", () => void this.start(true));
+		this.iconButton(ctl, "cpu", "切换模型", () => void this.safely(() => this.controller.pickModel()));
+		this.iconButton(ctl, "brain", "思考等级", () => void this.safely(() => this.controller.pickThinkingLevel()));
 		this.iconButton(ctl, "file-plus", "新会话", () => void this.safely(() => this.controller.newSession()));
 		this.abortBtn = this.iconButton(ctl, "square", "中止当前回合", () => void this.safely(() => this.controller.abort()));
 		this.iconButton(ctl, "refresh-cw", "重新加载历史", () => void this.reload());
@@ -204,13 +206,20 @@ export class LearningView extends ItemView implements ControllerSurface {
 	onStateChanged(): void {
 		const c = this.controller;
 		const st = c.state;
-		const parts: string[] = [];
 		const role = c.statuses.get("learning");
-		parts.push(c.running ? (role ?? "无角色") : "pi 未运行");
-		if (st?.model) parts.push(`${st.model.provider}/${st.model.id}`);
-		if (st?.sessionName) parts.push(st.sessionName);
-		if (st?.isStreaming) parts.push("生成中");
-		this.statusEl.setText(parts.join(" · "));
+		this.statusEl.empty();
+		this.statusEl.createSpan({ text: c.running ? (role ?? "无角色") : "pi 未运行" });
+		if (st?.model) {
+			this.statusEl.createSpan({ text: " · " });
+			const m = this.statusEl.createSpan({ cls: "pi-learning-model-link", text: `${st.model.provider}/${st.model.id}${st.thinkingLevel && st.thinkingLevel !== "off" ? ` (${st.thinkingLevel})` : ""}`, attr: { title: "点击切换模型" } });
+			m.addEventListener("click", () => void this.safely(() => this.controller.pickModel()));
+		} else if (c.running) {
+			this.statusEl.createSpan({ text: " · " });
+			const m = this.statusEl.createSpan({ cls: "pi-learning-model-link pi-learning-model-missing", text: "无可用模型", attr: { title: "点击选择模型" } });
+			m.addEventListener("click", () => void this.safely(() => this.controller.pickModel()));
+		}
+		if (st?.sessionName) this.statusEl.createSpan({ text: ` · ${st.sessionName}` });
+		if (st?.isStreaming) this.statusEl.createSpan({ text: " · 生成中" });
 		this.statusEl.toggleClass("pi-learning-status-off", !c.running);
 		this.abortBtn.toggleClass("pi-learning-hidden", !st?.isStreaming);
 		setIcon(this.startBtn, c.running ? "rotate-ccw" : "play");
