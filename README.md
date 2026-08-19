@@ -31,6 +31,16 @@ pi
 
 `/accept` 不带参数时取最近一份尚未接受的提案（按修改时间），接受后文件改名为 `*.accepted.json`，不会被重复合并；要接受某一份指定提案，`/accept blackboard/proposals/<文件>`。黑板文件仍是普通的 JSON 与 Markdown，想直接看或直接改随时可以，只是不必。
 
+## 把 starter 直接当作学习项目使用时
+
+仓库里的 `blackboard/` 只是种子。若你就在这个目录里学习（黑板会被真实数据填满），注意不要把个人数据推到公开的 starter 仓库：运行时目录（`proposals/`、`evidence/`、`assessments/`、`reflections/`、`artifacts/`、`exemplars/`）已在 `.gitignore` 里；`domain.json`、`concepts.json`、`path.json`、`sources.json`、`glossary.md`、`errors.jsonl`、`events.jsonl` 这七个既是种子又会被改写的文件，请在本地标记为 `skip-worktree`，之后 `git add -A` 不会再带上它们：
+
+```
+git update-index --skip-worktree blackboard/domain.json blackboard/concepts.json blackboard/path.json blackboard/sources.json blackboard/glossary.md blackboard/errors.jsonl blackboard/events.jsonl
+```
+
+更稳妥的做法是把学习项目放到另一个私有目录或私有仓库里（复制本仓库即可），黑板连同学习记录用 git 正常管理；插件设置里的「学习项目目录」指向那里。
+
 ## 无人值守出题
 
 作答仍由学习者在交互模式中用 `/take` 完成；脚本只在满足条件时出题（有 3 个以上到期概念、有待处理的 `unit_complete` / `errors_threshold` 事件、或距上次测试超过 7 天；没有 learned 及以上的概念或已有待作答的测试时跳过）。
