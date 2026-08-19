@@ -4,7 +4,7 @@
  * 每个工具先检查当前角色（防止串角色调用），再把模型提交的结构化内容交给 blackboard.ts 的
  * 规则函数处理。工具都以 executionMode: "sequential" 注册，避免并行写黑板文件。
  */
-import { readFileSync } from "node:fs";
+import { existsSync, readFileSync } from "node:fs";
 import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
@@ -141,7 +141,49 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
 
 ${summary}
 
-请把上面的摘要转述给学习者：如需调整，学习者直接在本会话说明，你修改后重新调用 bb_plan_propose；满意后学习者运行 /accept。`);
+请把上面的摘要转述给学习者：如需调整，学习者直接在本会话说明，你修改后重新调用 bb_plan_propose；学习者也可以运行 /critique 让独立的提案评审员审查；满意后学习者运行 /accept。`);
+		},
+	});
+
+	// ------------------------------------------------------------------ 提案评审员
+	pi.registerTool({
+		name: "bb_proposal_review",
+		label: "提交提案评审",
+		description:
+			"提案评审员对一份尚未接受的提案（规划或资料）提交独立审查结果：逐条发现（严重程度、对象、问题、建议）与结论。写入与提案同名的 *.review.json / *.review.md；不修改提案本身。存在 blocking 发现时结论必须为 revise。",
+		parameters: Type.Object({
+			verdict: StringEnum(["accept", "revise"] as const),
+			summary: Type.String({ description: "一两句话：提案总体是否可用、主要问题是什么" }),
+			findings: Type.Array(
+				Type.Object({
+					severity: StringEnum(["blocking", "major", "minor"] as const),
+					target: Type.String({ description: "概念 id、单元 id、资料 id，或 structure" }),
+					issue: Type.String(),
+					suggestion: Type.String({ description: "建议的修改方向，不代写完整内容" }),
+				}),
+			),
+		}),
+		executionMode: "sequential",
+		async execute(_id, params) {
+			const state = deps.state();
+			requireRole(state, "critic");
+			const file = state.proposal;
+			if (!file || !existsSync(file)) throw new Error("没有待审提案：请学习者先运行 /critique [提案文件]。");
+			const blocking = params.findings.filter((f) => f.severity === "blocking").length;
+			if (blocking > 0 && params.verdict === "accept") throw new Error("存在 blocking 发现时结论必须为 revise，请修正后重新提交。");
+			const major = params.findings.filter((f) => f.severity === "major").length;
+			const minor = params.findings.length - blocking - major;
+			const data = { proposal: file, ...params, counts: { blocking, major, minor }, recorded_at: new Date().toISOString() };
+			const lines = [`# 提案评审：${file}`, ``, `结论：${params.verdict}（blocking ${blocking}，major ${major}，minor ${minor}）`, ``, params.summary, ``];
+			for (const f of params.findings) lines.push(`- [${f.severity}] ${f.target}：${f.issue}（建议：${f.suggestion}）`);
+			const out = bb.writeReview(file, data, lines.join("\n") + "\n");
+			return text(
+				[
+					`评审已写入 ${out.md}。`,
+					`结论 ${params.verdict}：blocking ${blocking}，major ${major}，minor ${minor}。`,
+					`请把发现要点转述给学习者，并说明下一步：/accept 接受提案；或运行 /plan revise（资料提案则 /sources）让提案者按评审意见修改后重新提交。`,
+				].join("\n"),
+			);
 		},
 	});
 

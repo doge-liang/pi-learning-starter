@@ -44,13 +44,17 @@ describe("学习工作流（全流程）", () => {
 	before(async () => {
 		learningExtension(pi.api());
 		await pi.emit("session_start", { reason: "startup" }, ctx);
+		bb_latestProposal = () => {
+			const files = readdirSync(join(bbDir, "proposals")).filter((f) => f.endsWith(".json") && !f.endsWith(".accepted.json") && !f.endsWith(".review.json")).sort();
+			return join(bbDir, "proposals", files[files.length - 1]);
+		};
 	});
 	after(() => project.cleanup());
 
-	it("注册了 10 个 bb_* 工具、20 个命令与 4 个事件处理器", () => {
+	it("注册了 11 个 bb_* 工具、22 个命令与 4 个事件处理器", () => {
 		const bbTools = [...pi.tools.keys()].filter((n) => n.startsWith("bb_"));
-		assert.equal(bbTools.length, 10, bbTools.join(","));
-		assert.equal(pi.commands.size, 20, [...pi.commands.keys()].join(","));
+		assert.equal(bbTools.length, 11, bbTools.join(","));
+		assert.equal(pi.commands.size, 22, [...pi.commands.keys()].join(","));
 		assert.deepEqual([...pi.handlers.keys()].sort(), ["before_agent_start", "input", "session_start", "tool_call"]);
 	});
 
@@ -117,13 +121,28 @@ describe("学习工作流（全流程）", () => {
 			assert.match(pi.lastMessage(), /bb_plan_propose/);
 		});
 
-		it("before_agent_start 追加角色提示并注入一次黑板上下文；内容不变则不再注入", async () => {
+		it("before_agent_start 追加角色提示并注入一次黑板上下文；首次规划带自带范例；内容不变则不再注入", async () => {
 			const r1 = await contextOf(pi, ctx);
 			assert.ok(r1?.systemPrompt.startsWith("BASE\n\n# 角色：领域专家"));
+			assert.ok(r1?.systemPrompt.includes("好的规划的标准"));
 			assert.ok(r1?.message?.content.includes("# 黑板上下文"));
 			assert.ok(r1?.message?.content.includes("深度学习框架内部原理"));
+			assert.ok(r1?.message?.content.includes("规划范例（结构示范") && r1?.message?.content.includes("limited-direct-execution"), "首次规划注入自带范例");
+			assert.ok(!r1?.message?.content.includes("学习者提供的范例"), "尚无学习者范例");
 			const r2 = await contextOf(pi, ctx);
 			assert.equal(r2?.message, undefined);
+		});
+
+		it("/exemplar 经编辑器写入 blackboard/exemplars/，随后进入规划者上下文", async () => {
+			uiScript.editor.push("# CS336 大纲（节选）\n\nLecture 1: Tokenization …");
+			ctx.notices.length = 0;
+			await pi.command("exemplar").handler("cs336-syllabus", ctx);
+			assert.ok(existsSync(join(bbDir, "exemplars", "cs336-syllabus.md")));
+			assert.deepEqual(pi.command("exemplar").getArgumentCompletions?.("cs")?.map((x) => x.value), ["cs336-syllabus"]);
+			const ctxText = (await contextOf(pi, ctx))?.message?.content ?? "";
+			assert.ok(ctxText.includes("学习者提供的范例") && ctxText.includes("Tokenization"));
+			await pi.command("exemplar").handler("../evil", ctx);
+			assert.ok(ctx.notices.some(([, m]) => m.includes("只接受名字")));
 		});
 
 		it("bb_plan_propose 拒绝悬空前置与成环", async () => {
@@ -165,10 +184,51 @@ describe("学习工作流（全流程）", () => {
 			const r = await pi.tool("bb_plan_propose").execute("t", proposal);
 			assert.match(r.content[0].text, /4 个概念（core 3，branch 1），2 个单元/);
 			assert.match(r.content[0].text, /- u01 张量与计算图：张量（Tensor）、计算图（Computation Graph）/);
+			assert.match(r.content[0].text, /\/critique/);
 			assert.ok(existsSync(join(bbDir, "proposals")));
+		});
 
+		it("/critique 进入独立评审员：上下文含提案原文；bb_proposal_review 写评审文件；blocking 时不得 accept", async () => {
+			pi.sentMessages.length = 0;
+			await pi.command("critique").handler("", ctx);
+			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.critic.tools]);
+			assert.match(pi.lastMessage(), /独立审查提案/);
+			const ctxText = (await contextOf(pi, ctx))?.message?.content ?? "";
+			assert.ok(ctxText.includes("待审提案") && ctxText.includes('"autograd-graph"') && ctxText.includes("学习者画像（完整）"));
+
+			await assert.rejects(
+				pi.tool("bb_proposal_review").execute("t", { verdict: "accept", summary: "x", findings: [{ severity: "blocking", target: "u02", issue: "缺前置", suggestion: "补" }] }),
+				/blocking 发现时结论必须为 revise/,
+			);
+			const r = await pi.tool("bb_proposal_review").execute("t", {
+				verdict: "revise",
+				summary: "结构可用，但反向传播单元缺少链式法则前置。",
+				findings: [
+					{ severity: "blocking", target: "u02", issue: "反向传播依赖多元微积分的链式法则，提案未作为前置概念列出", suggestion: "在 u01 与 u02 之间插入链式法则概念" },
+					{ severity: "minor", target: "jit", issue: "JIT 与目标无关", suggestion: "后置或删除" },
+				],
+			});
+			assert.match(r.content[0].text, /结论 revise：blocking 1，major 0，minor 1/);
+			const proposalFile = bb_latestProposal();
+			const reviewJson = proposalFile.replace(/\.json$/, ".review.json");
+			assert.ok(existsSync(reviewJson) && existsSync(reviewJson.replace(/\.json$/, ".md")));
+			assert.equal(readJson(reviewJson).verdict, "revise");
+		});
+
+		it("/plan revise：规划者上下文含待修改的提案与评审意见", async () => {
+			pi.sentMessages.length = 0;
+			await pi.command("plan").handler("revise", ctx);
+			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.planner.tools]);
+			assert.match(pi.lastMessage(), /依据黑板上下文中「对该提案的评审意见」修改/);
+			const ctxText = (await contextOf(pi, ctx))?.message?.content ?? "";
+			assert.ok(ctxText.includes("对该提案的评审意见") && ctxText.includes("链式法则") && ctxText.includes("待修改的提案"));
+		});
+
+		it("/accept 的确认框带评审结论；接受后写入黑板并发 structure_ready", async () => {
 			uiScript.confirm.push(true);
+			ctx.confirms.length = 0;
 			await pi.command("accept").handler("", ctx);
+			assert.match(ctx.confirms[0]?.[1] ?? "", /评审结论：revise（blocking 1，major 0，minor 1）。评审员建议先修改：\/plan revise/);
 			const concepts = readJson(join(bbDir, "concepts.json")).concepts;
 			assert.equal(concepts.length, 4);
 			assert.ok(concepts.every((c: any) => c.mastery === "untouched" && Array.isArray(c.evidence)));
@@ -651,6 +711,10 @@ describe("会话切换交接与恢复", () => {
 });
 
 // ---------- 辅助 ----------
+/** 最近一份尚未接受的提案（测试里只有一个 proposals 目录在用） */
+let bb_latestProposal: () => string = () => {
+	throw new Error("未初始化");
+};
 function readdirFirst(dir: string, suffix: string, prefix = ""): string | undefined {
 	if (!existsSync(dir)) return undefined;
 	return readdirSync(dir)

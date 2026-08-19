@@ -279,6 +279,14 @@ export class Blackboard {
 		return out;
 	}
 
+	/** 学习者放进 blackboard/exemplars/ 的范例与良好实践（/exemplar 写入），供规划者与评审员参考 */
+	exemplars(maxCharsEach = 12000): Array<{ name: string; text: string }> {
+		return this.listFiles("exemplars", "", ".md").map((f) => {
+			const text = this.readText(`exemplars/${f}`);
+			return { name: f.replace(/\.md$/, ""), text: text.length > maxCharsEach ? `${text.slice(0, maxCharsEach)}\n…（已截断）` : text };
+		});
+	}
+
 	// ---------- 错误日志 ----------
 
 	unresolvedErrors(ids?: Iterable<string>): ErrorRow[] {
@@ -377,7 +385,8 @@ export class Blackboard {
 	 * plan-* 与 sources-* 按名字排序会让资料提案永远压在规划提案之后。
 	 */
 	latestProposal(kind?: "plan" | "sources"): string | undefined {
-		const files = this.listFiles("proposals", kind ? `${kind}-` : "", ".json").filter((f) => !f.endsWith(".accepted.json"));
+		// 排除已接受的提案与评审文件（x.review.json 与提案同目录同前缀）
+		const files = this.listFiles("proposals", kind ? `${kind}-` : "", ".json").filter((f) => !f.endsWith(".accepted.json") && !f.endsWith(".review.json"));
 		if (!files.length) return undefined;
 		const ranked = files
 			.map((f) => ({ f, t: statSync(this.path("proposals", f)).mtimeMs }))
@@ -404,6 +413,32 @@ export class Blackboard {
 		]
 			.filter(Boolean)
 			.join("\n");
+	}
+
+	/** 提案文件原文（绝对路径），供上下文装配；不存在则返回说明 */
+	readProposalText(absPath: string): string {
+		return existsSync(absPath) ? readFileSync(absPath, "utf8") : `（文件不存在：${absPath}）`;
+	}
+
+	/** 提案评审文件：与提案同目录，x.json → x.review.json（Markdown 版 x.review.md） */
+	reviewPathFor(proposalAbs: string): string {
+		return proposalAbs.replace(/\.accepted\.json$/, ".json").replace(/\.json$/, ".review.json");
+	}
+	readReview(proposalAbs: string): Record<string, unknown> | undefined {
+		const p = this.reviewPathFor(proposalAbs);
+		if (!existsSync(p)) return undefined;
+		try {
+			return JSON.parse(readFileSync(p, "utf8")) as Record<string, unknown>;
+		} catch {
+			return undefined;
+		}
+	}
+	writeReview(proposalAbs: string, data: Record<string, unknown>, markdown: string): { json: string; md: string } {
+		const json = this.reviewPathFor(proposalAbs);
+		writeFileSync(json, JSON.stringify(data, null, 2) + "\n", "utf8");
+		const md = json.replace(/\.review\.json$/, ".review.md");
+		writeFileSync(md, markdown, "utf8");
+		return { json, md };
 	}
 
 	/** 接受后把 x.json 改名为 x.accepted.json，避免 /accept 重复合并同一份提案 */

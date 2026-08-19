@@ -10,8 +10,8 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { join } from "node:path";
 import { CONFIG_DIR_NAME, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-export type Role = "intake" | "planner" | "librarian" | "tutor" | "reviewer" | "assessor";
-export const ROLE_NAMES: Role[] = ["intake", "planner", "librarian", "tutor", "reviewer", "assessor"];
+export type Role = "intake" | "planner" | "critic" | "librarian" | "tutor" | "reviewer" | "assessor";
+export const ROLE_NAMES: Role[] = ["intake", "planner", "critic", "librarian", "tutor", "reviewer", "assessor"];
 
 export interface PreQuestion {
 	id: string;
@@ -39,6 +39,8 @@ export interface LearningState {
 	responses: LearnerAnswer[];
 	/** 评审：产出物路径 */
 	artifact?: string;
+	/** 提案评审：待审提案的绝对路径（/critique 设置） */
+	proposal?: string;
 	/** 上一次注入的上下文哈希，避免重复注入 */
 	contextHash?: string;
 }

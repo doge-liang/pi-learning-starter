@@ -5,7 +5,7 @@
  * 模型与会话名、发送用户消息，以及 ctx.ui 的对话框（用预置答案代替真人输入）。
  * newSession 模拟 pi 的真实行为：重建扩展实例、先发 session_start(reason="new")，再调用 withSession。
  */
-import { cpSync, mkdirSync, mkdtempSync, rmSync } from "node:fs";
+import { cpSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from "node:fs";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext, ExtensionContext } from "@earendil-works/pi-coding-agent";
@@ -125,18 +125,24 @@ export interface HarnessOptions {
 }
 
 /** 构造扩展上下文；工具与命令共用同一个对象（ExtensionCommandContext 是其超集） */
-export function makeCtx(pi: FakePi, opts: HarnessOptions): ExtensionCommandContext & { notices: Array<[string, string]>; statuses: Map<string, string | undefined> } {
+type CtxExtras = { notices: Array<[string, string]>; confirms: Array<[string, string]>; statuses: Map<string, string | undefined> };
+export function makeCtx(pi: FakePi, opts: HarnessOptions): ExtensionCommandContext & CtxExtras {
 	const ui = opts.ui ?? {};
 	const notices: Array<[string, string]> = [];
+	const confirms: Array<[string, string]> = [];
 	const statuses = new Map<string, string | undefined>();
 	const ctx = {
 		cwd: opts.cwd,
 		hasUI: opts.hasUI ?? true,
 		notices,
+		confirms,
 		statuses,
 		ui: {
 			notify: (msg: string, level = "info") => notices.push([level, msg]),
-			confirm: async () => (ui.confirm ?? []).shift() ?? false,
+			confirm: async (title: string, message: string) => {
+				confirms.push([title, message]);
+				return (ui.confirm ?? []).shift() ?? false;
+			},
 			editor: async (_title: string, prefill = "") => {
 				const v = (ui.editor ?? []).shift();
 				return typeof v === "function" ? v(prefill) : v;
@@ -180,14 +186,30 @@ export function makeCtx(pi: FakePi, opts: HarnessOptions): ExtensionCommandConte
 		getSystemPrompt: () => "",
 		signal: new AbortController().signal,
 	};
-	return ctx as unknown as ExtensionCommandContext & { notices: Array<[string, string]>; statuses: Map<string, string | undefined> };
+	return ctx as unknown as ExtensionCommandContext & CtxExtras;
 }
 
-/** 把仓库里的 blackboard/ 与 .pi/learning.json 复制到临时目录，作为一次测试的项目根 */
+/**
+ * 在临时目录生成一份种子黑板，作为一次测试的项目根。
+ * 不复制仓库里的 blackboard/：那里可能是学习者的真实数据（仓库既是 starter 也可能被当作实际项目使用）。
+ */
 export function makeProject(repoRoot: string): { cwd: string; cleanup: () => void } {
 	const cwd = mkdtempSync(join(tmpdir(), "pi-learning-test-"));
-	cpSync(join(repoRoot, "blackboard"), join(cwd, "blackboard"), { recursive: true });
+	writeSeedBlackboard(join(cwd, "blackboard"));
 	mkdirSync(join(cwd, ".pi"), { recursive: true });
 	cpSync(join(repoRoot, ".pi", "learning.json"), join(cwd, ".pi", "learning.json"));
 	return { cwd, cleanup: () => rmSync(cwd, { recursive: true, force: true }) };
+}
+
+/** 与仓库种子等价的最小黑板：未做访谈的 domain.json、空的概念 / 路径 / 资料、术语表头、空日志、各子目录 */
+export function writeSeedBlackboard(dir: string): void {
+	for (const d of ["", "evidence", "artifacts", "artifacts/reviews", "assessments", "reflections", "proposals"]) mkdirSync(join(dir, d), { recursive: true });
+	const w = (rel: string, text: string) => writeFileSync(join(dir, rel), text, "utf8");
+	w("domain.json", `${JSON.stringify({ language: "zh", preferences: { formats: ["textbook", "paper", "course", "code"], languages: ["zh", "en"] } }, null, 2)}\n`);
+	w("concepts.json", '{ "concepts": [] }\n');
+	w("path.json", '{ "units": [], "notes": "" }\n');
+	w("sources.json", '{ "sources": [] }\n');
+	w("glossary.md", "# 术语表\n\n由学习者亲笔撰写。\n");
+	w("errors.jsonl", "");
+	w("events.jsonl", "");
 }

@@ -20,11 +20,18 @@ const starterRoot = resolve(pluginRoot, "..");
 /** 复制一份 starter（扩展 + 黑板）到临时目录，避免污染仓库；会话存到临时 agent 目录 */
 function makeProject(): { cwd: string; cleanup: () => void } {
 	const cwd = mkdtempSync(join(tmpdir(), "pi-learning-plugin-test-"));
-	cpSync(join(starterRoot, ".pi"), join(cwd, ".pi"), { recursive: true });
-	cpSync(join(starterRoot, "blackboard"), join(cwd, "blackboard"), { recursive: true });
+	// 只复制扩展与说明；黑板用最小种子生成（仓库里的 blackboard/ 可能是学习者的真实数据）
+	cpSync(join(starterRoot, ".pi", "extensions"), join(cwd, ".pi", "extensions"), { recursive: true });
+	cpSync(join(starterRoot, ".pi", "learning.json"), join(cwd, ".pi", "learning.json"));
 	cpSync(join(starterRoot, "AGENTS.md"), join(cwd, "AGENTS.md"));
+	const bb = join(cwd, "blackboard");
+	for (const d of ["", "evidence", "artifacts", "assessments", "reflections", "proposals"]) mkdirSync(join(bb, d), { recursive: true });
+	writeFileSync(join(bb, "domain.json"), JSON.stringify({ language: "zh" }), "utf8");
+	writeFileSync(join(bb, "concepts.json"), JSON.stringify({ concepts: [] }), "utf8");
+	writeFileSync(join(bb, "path.json"), JSON.stringify({ units: [] }), "utf8");
+	writeFileSync(join(bb, "glossary.md"), "# 术语表\n", "utf8");
 	// 给 /verify 准备一份未核验资料
-	writeFileSync(join(cwd, "blackboard", "sources.json"), JSON.stringify({ sources: [{ id: "s1", title: "Source One", verified: false }] }), "utf8");
+	writeFileSync(join(bb, "sources.json"), JSON.stringify({ sources: [{ id: "s1", title: "Source One", verified: false }] }), "utf8");
 	return { cwd, cleanup: () => rmSync(cwd, { recursive: true, force: true }) };
 }
 
@@ -131,5 +138,3 @@ async function waitFor(pred: () => boolean, timeoutMs = 8000): Promise<void> {
 function sleep(ms: number): Promise<void> {
 	return new Promise((r) => setTimeout(r, ms));
 }
-// mkdirSync 仅为保持导入一致（部分环境 cpSync 需要目标父目录存在）
-void mkdirSync;

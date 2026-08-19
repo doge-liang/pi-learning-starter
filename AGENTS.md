@@ -1,6 +1,6 @@
 # 学习工作流项目说明（AGENTS.md）
 
-本目录是一个个人学习项目，运行在 pi 之上，由 `.pi/extensions/learning/` 扩展驱动。你在这里扮演的角色由扩展在系统提示中指定（学习顾问、领域专家、资料管理员、陪读老师、评审员、复盘老师之一）；没有角色时，你是普通的 pi 编码助手，可以帮助学习者维护本项目本身。
+本目录是一个个人学习项目，运行在 pi 之上，由 `.pi/extensions/learning/` 扩展驱动。你在这里扮演的角色由扩展在系统提示中指定（学习顾问、领域专家、提案评审员、资料管理员、陪读老师、评审员、复盘老师之一）；没有角色时，你是普通的 pi 编码助手，可以帮助学习者维护本项目本身。
 
 ## 黑板（blackboard/）
 
@@ -13,7 +13,8 @@
 - `artifacts/` 学习者的产出物与 `reviews/` 评审记录
 - `assessments/` 测试（pending / taken / result）与 `calibration.jsonl`
 - `reflections/` 复盘提纲与学习者亲笔的复盘
-- `proposals/` 规划与资料提案，学习者用 `/accept` 接受后才写入正式文件；已接受的提案改名为 `*.accepted.json`
+- `proposals/` 规划与资料提案，学习者用 `/accept` 接受后才写入正式文件；已接受的提案改名为 `*.accepted.json`；`/critique` 的评审写在同名 `*.review.json` / `*.review.md`
+- `exemplars/` 学习者提供的规划范例与良好实践（`/exemplar`），规划者与评审员参考
 
 ## 规则
 
@@ -29,6 +30,6 @@
 
 ## 学习者可用的命令
 
-`/learn` 概览 · `/domain` 入学访谈 · `/plan [replan]` 规划 · `/accept` 接受提案 · `/sources [unit] [障碍说明]` 选材 · `/verify [id]` 标记资料已核验 · `/read [unit]` 阅读会话 · `/hint` `/explain` 切换模式 · `/answer` 闭卷作答 · `/gloss <id>` 写术语表 · `/done` 结束会话 · `/artifact <名字>` 写产出物 · `/review <文件> [unit]` 评审 · `/assess [n]` 出题 · `/take` 作答 · `/reflect` 写复盘 · `/events` `/dispatch` 事件 · `/role <name|none>` 原地切换角色
+`/learn` 概览 · `/domain` 入学访谈 · `/plan [replan|revise]` 规划 · `/critique [文件]` 独立评审提案 · `/exemplar <名字>` 提供范例 · `/accept` 接受提案 · `/sources [unit] [障碍说明]` 选材 · `/verify [id]` 标记资料已核验 · `/read [unit]` 阅读会话 · `/hint` `/explain` 切换模式 · `/answer` 闭卷作答 · `/gloss <id>` 写术语表 · `/done` 结束会话 · `/artifact <名字>` 写产出物 · `/review <文件> [unit]` 评审 · `/assess [n]` 出题 · `/take` 作答 · `/reflect` 写复盘 · `/events` `/dispatch` 事件 · `/role <name|none>` 原地切换角色
 
 学习者的界面始终是对话与对话框；不要求学习者手改黑板文件。

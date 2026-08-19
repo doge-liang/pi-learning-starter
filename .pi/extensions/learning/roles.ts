@@ -4,6 +4,9 @@
  * 角色提示是稳定文本（追加到 pi 的系统提示之后，利于提示缓存）；黑板上下文单独作为一条
  * 自定义消息注入，只在内容变化时重新注入（见 index.ts 的 before_agent_start）。
  */
+import { existsSync, readFileSync } from "node:fs";
+import { join } from "node:path";
+import { fileURLToPath } from "node:url";
 import type { Blackboard } from "./blackboard.ts";
 import type { LearningState, Role } from "./state.ts";
 
@@ -57,7 +60,41 @@ ${COMMON}`,
 4. 学习单元按拓扑序排列，每个单元覆盖 2 到 5 个概念，配 1 到 3 个练习，并写出可检验的退出标准（学习者不看资料能做到什么）。
 5. 重规划场景只做增量修改：插入补救单元、调整顺序、修剪分支，并在 notes 中说明每处改动的依据；已存在的概念 id 必须保留。
 6. 概念名称首次出现时附英文术语，便于检索文献。
-7. 完成后调用 bb_plan_propose 提交提案；提案由学习者审阅并用 /accept 接受后才生效。
+7. 完成后调用 bb_plan_propose 提交提案；提案由学习者审阅（可先 /critique 交给独立评审员）并用 /accept 接受后才生效。
+
+## 好的规划的标准（评审员按同一套标准审查）
+- 退出标准全部可检验：以「写出 / 画出 / 手算 / 解释为什么 / 辨析」开头，描述不看资料能做到的事；不用「理解 / 掌握 / 了解」。
+- 每条退出标准至少对应一个练习，练习能产生可评审的产出物。
+- 第一个单元足够具体，第一天就能上手；导论性、概述性的单元不放在开头。
+- 每个单元的阅读加练习量按 weekly_hours 估计控制在一到两周。
+- 黑板上下文里若给出了「规划范例」与「学习者提供的范例」，学习的是结构与写法；领域不同时不要照抄内容。
+${COMMON}`,
+	},
+	critic: {
+		name: "critic",
+		label: "提案评审员（独立审查）",
+		tools: ["bb_status", "bb_proposal_review"],
+		prompt: `# 角色：提案评审员（Proposal Critic）
+
+你独立审查另一位角色提交的提案（知识结构与学习路径提案，或资料提案），供学习者决定是否接受。你没有参与提案的生成，也看不到生成者的对话；你只依据黑板上下文中的提案内容、学习者画像与现有黑板。你不修改提案，不代替学习者做决定。
+
+## 审查规划提案时逐项检查
+1. 目标对齐：概念与单元是否指向 domain.json 里的目标；有无与目标无关的分支占据主干。
+2. 覆盖与缺口：对照该领域公认教材的章节结构，缺了哪些必要概念，多了哪些可以后置。
+3. 前置关系：是否真正阻塞理解；有无遗漏的关键前置（例如必需的数学工具）；有无把「相关」写成前置。
+4. 粒度：每个概念能否用一段话定义、一道题检验；过粗或过细的逐个指出。
+5. 顺序与负荷：单元拓扑序是否成立；按 weekly_hours 估计，每个单元的时长是否合理；开头两三个单元是否足够具体、可立即上手。
+6. 退出标准：是否可检验（不看资料能做到什么），而不是「理解 X」。
+7. 重规划（黑板上已有概念时）：是否保留了已有概念 id；补救单元是否针对错误日志与测评结果；有无不必要的大改。
+
+## 审查资料提案时逐项检查
+定位是否精确到章节、DOI 或完整 URL；是否覆盖单元的全部概念；时长估计是否合理；来源是否权威；是否有编造嫌疑（定位含糊、书名与版次不符）。你不能上网核实，把疑点列为待学习者核验。
+
+## 输出
+- 每条发现：严重程度（blocking：接受前必须改；major：应当改；minor：可选）、对象（概念 id、单元 id、资料 id 或 structure）、问题、建议的修改方向。
+- 结论：accept（可直接接受）或 revise（建议先修改）。存在 blocking 发现时必须为 revise。
+- 不写赞美；可以用一两句话说明提案总体是否可用。
+- 调用 bb_proposal_review 提交；然后把要点转述给学习者，并说明下一步：运行 /accept 接受，或运行 /plan revise（资料提案则 /sources）让提案者按意见修改。
 ${COMMON}`,
 	},
 	librarian: {
@@ -161,6 +198,30 @@ export function buildContext(bb: Blackboard, state: LearningState): string {
 			parts.push("## 现有路径", j(bb.units()));
 			parts.push("## 未解决错误（最近 30 条）", j(bb.unresolvedErrors().slice(-30)));
 			parts.push("## 最近测评结果", j(recentResults(bb)));
+			// 有尚未接受的规划提案且已被评审时，把提案与评审意见一并给规划者（/plan revise 用）
+			const pending = bb.latestProposal("plan");
+			const review = pending ? bb.readReview(pending) : undefined;
+			if (pending && review) {
+				parts.push("## 待修改的提案（尚未接受）", bb.readProposalText(pending));
+				parts.push("## 对该提案的评审意见", j(review));
+			}
+			// 首次规划或修改提案时给出范例：结构示范 + 学习者自己提供的良好实践
+			if (bb.concepts().length === 0 || review) parts.push("## 规划范例（结构示范，领域不同，勿照抄内容）", builtinExemplar(bb));
+			pushLearnerExemplars(parts, bb);
+			break;
+		}
+		case "critic": {
+			const file = state.proposal;
+			parts.push("## 学习者画像（完整）", j(domain));
+			parts.push("## 待审提案", file ? `${file}
+
+${bb.readProposalText(file)}` : "（未指定；请让学习者用 /critique 指定）");
+			parts.push("## 现有概念与掌握度（为空即首次规划）", j(bb.conceptBrief()));
+			parts.push("## 现有路径", j(bb.units()));
+			parts.push("## 未解决错误（最近 20 条）", j(bb.unresolvedErrors().slice(-20)));
+			parts.push("## 最近测评结果", j(recentResults(bb)));
+			parts.push("## 好的规划长什么样（范例与反例，审查时对照）", builtinExemplar(bb));
+			pushLearnerExemplars(parts, bb);
 			break;
 		}
 		case "librarian": {
@@ -208,6 +269,27 @@ export function buildContext(bb: Blackboard, state: LearningState): string {
 	return parts.join("\n\n");
 }
 
+/** 扩展自带的规划范例（exemplars/plan-exemplar.md）；读取失败时退回一句说明 */
+function builtinExemplar(bb: Blackboard): string {
+	const candidates: string[] = [];
+	try {
+		candidates.push(fileURLToPath(new URL("./exemplars/plan-exemplar.md", import.meta.url)));
+	} catch {
+		/* 某些加载器不提供 import.meta.url */
+	}
+	candidates.push(join(bb.cwd, ".pi", "extensions", "learning", "exemplars", "plan-exemplar.md"));
+	for (const p of candidates) {
+		if (existsSync(p)) return readFileSync(p, "utf8");
+	}
+	return "（范例文件缺失）";
+}
+
+function pushLearnerExemplars(parts: string[], bb: Blackboard): void {
+	const ex = bb.exemplars();
+	if (!ex.length) return;
+	parts.push("## 学习者提供的范例与良好实践（blackboard/exemplars/）", ex.map((e) => `### ${e.name}\n\n${e.text}`).join("\n\n"));
+}
+
 function recentResults(bb: Blackboard, n = 3): unknown[] {
 	return bb
 		.listFiles("assessments", "", "-result.json")
@@ -232,16 +314,19 @@ function recentEvidence(bb: Blackboard, n = 8): unknown[] {
 // 会话开场语
 // ======================================================================
 
-export function kickoff(role: Role, opts: { replan?: boolean; units?: string[]; unit?: string; note?: string; artifact?: string; maxItems?: number; existing?: boolean } = {}): string {
+export function kickoff(role: Role, opts: { replan?: boolean; revise?: boolean; units?: string[]; unit?: string; note?: string; artifact?: string; maxItems?: number; existing?: boolean; proposal?: string } = {}): string {
 	switch (role) {
 		case "intake":
 			return opts.existing
 				? "[begin-intake] domain.json 已有内容。请先复述现状，然后问我要修改什么；整理好后调用 bb_domain_set。"
 				: "[begin-intake] 请开始入学访谈：先了解我要学什么领域、想达到什么可检验的目标。";
 		case "planner":
+			if (opts.revise) return "请依据黑板上下文中「对该提案的评审意见」修改「待修改的提案」：只改需要改的部分，保留概念 id，在 notes 中逐条说明采纳或不采纳每条意见的理由，然后重新调用 bb_plan_propose 提交。";
 			return opts.replan
 				? "请做增量重规划：依据黑板上下文中的测评结果与未解决错误，插入补救单元、调整顺序、修剪不必要的分支，保留已有概念 id，然后调用 bb_plan_propose 提交提案。"
 				: "请为黑板上下文中的学习者规划知识结构与学习路径，然后调用 bb_plan_propose 提交提案。";
+		case "critic":
+			return `请独立审查提案 ${opts.proposal ?? ""}：逐项检查后调用 bb_proposal_review 提交发现与结论，再把要点转述给我。`;
 		case "librarian":
 			return opts.note
 				? `学习者对单元 ${opts.unit} 的现有资料理解困难：${opts.note}。请提供角度不同、更基础或更具体的替代资料，然后调用 bb_sources_propose 提交（alternative 标为 true）。`

@@ -20,7 +20,9 @@ export const COMMAND_GROUPS: CommandGroup[] = [
 		commands: [
 			{ name: "learn", label: "概览", hint: "黑板概览：掌握度、当前单元、到期复习、事件" },
 			{ name: "domain", label: "入学访谈", hint: "学习顾问通过对话整理领域、目标、背景与偏好" },
-			{ name: "plan", label: "规划", hint: "领域专家规划知识结构与学习路径", arg: { prompt: "参数（留空为首次规划；输入 replan 做增量重规划）", placeholder: "replan", optional: true } },
+			{ name: "plan", label: "规划", hint: "领域专家规划知识结构与学习路径", arg: { prompt: "参数（留空为首次规划；replan 增量重规划；revise 按评审意见修改）", placeholder: "replan / revise", optional: true } },
+			{ name: "critique", label: "评审提案", hint: "独立的提案评审员审查最近一份提案" },
+			{ name: "exemplar", label: "提供范例", hint: "粘贴课程大纲或良好实践供规划者参考", arg: { prompt: "范例名字", placeholder: "cs336-syllabus" } },
 			{ name: "accept", label: "接受提案", hint: "接受最近一份尚未接受的规划 / 资料提案" },
 			{ name: "sources", label: "选材", hint: "资料管理员为单元匹配资料", arg: { prompt: "参数（留空为所有无资料单元；或「单元id 障碍说明」请求替代资料）", placeholder: "u01 看不懂第二节", optional: true } },
 			{ name: "verify", label: "核验资料", hint: "亲自打开资料后标记已核验", arg: { prompt: "资料 id（留空则从未核验列表选择）", optional: true } },

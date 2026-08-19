@@ -58,11 +58,56 @@ export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
 	});
 
 	pi.registerCommand("plan", {
-		description: "领域专家：规划（/plan）或增量重规划（/plan replan）",
+		description: "领域专家：规划（/plan）、增量重规划（/plan replan）、按评审意见修改最近的提案（/plan revise）",
+		getArgumentCompletions: (prefix) => {
+			const items = ["replan", "revise"].filter((x) => x.startsWith(prefix)).map((x) => ({ value: x, label: x }));
+			return items.length ? items : null;
+		},
 		handler: async (args, ctx) => {
 			if (!bb.domain().domain) return ctx.ui.notify("还没有学习者画像；请先运行 /domain 完成入学访谈。", "warning");
-			const replan = args.trim() === "replan";
-			await enter(ctx, "planner", {}, `planner ${replan ? "replan" : "plan"} ${today()}`, kickoff("planner", { replan }));
+			const mode = args.trim();
+			const replan = mode === "replan";
+			const revise = mode === "revise";
+			if (revise) {
+				const pending = bb.latestProposal("plan");
+				if (!pending || !bb.readReview(pending)) return ctx.ui.notify("没有带评审意见的待接受规划提案；先运行 /critique。", "warning");
+			}
+			await enter(ctx, "planner", {}, `planner ${revise ? "revise" : replan ? "replan" : "plan"} ${today()}`, kickoff("planner", { replan, revise }));
+		},
+	});
+
+	pi.registerCommand("exemplar", {
+		description: "提供规划范例或良好实践（课程大纲、你认可的学习路径等），供规划者与评审员参考：/exemplar <名字>",
+		getArgumentCompletions: (prefix) => {
+			const items = bb
+				.exemplars(1)
+				.map((e) => e.name)
+				.filter((n) => n.startsWith(prefix))
+				.map((n) => ({ value: n, label: n }));
+			return items.length ? items : null;
+		},
+		handler: async (args, ctx) => {
+			let name = args.trim();
+			if (!name) return ctx.ui.notify("用法：/exemplar <名字>，例如 /exemplar cs336-syllabus", "warning");
+			if (/[\\/]/.test(name)) return ctx.ui.notify("只接受名字，不接受路径。", "warning");
+			name = name.replace(/\.md$/, "");
+			if (!ctx.hasUI) return ctx.ui.notify("该命令需要交互界面。", "warning");
+			const rel = `exemplars/${name}.md`;
+			const current = bb.readText(rel);
+			const body = await ctx.ui.editor(`范例：${name}（粘贴课程大纲、学习路径或你认可的做法；可加一两句说明好在哪里）`, current);
+			if (body === undefined || !body.trim()) return;
+			bb.writeText(rel, body.endsWith("\n") ? body : `${body}\n`);
+			ctx.ui.notify(`已保存 blackboard/${rel}；规划者与评审员会在下次进入时看到。`, "info");
+		},
+	});
+
+	pi.registerCommand("critique", {
+		description: "提案评审员：独立审查最近一份尚未接受的（或指定的）提案，/critique [提案文件]",
+		handler: async (args, ctx) => {
+			const file = args.trim() ? resolve(ctx.cwd, args.trim()) : bb.latestProposal();
+			if (!file || !existsSync(file)) return ctx.ui.notify("没有待审的提案文件；先运行 /plan 或 /sources。", "warning");
+			const base = file.split(/[\\/]/).pop() ?? "proposal";
+			await enter(ctx, "critic", { proposal: file }, `critic ${base} ${today()}`, kickoff("critic", { proposal: file }));
 		},
 	});
 
@@ -77,7 +122,12 @@ export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
 			} catch {
 				/* 摘要失败时退回显示路径 */
 			}
-			const ok = ctx.hasUI ? await ctx.ui.confirm("接受提案？", `${summary}\n\n接受后写入黑板。要修改请回到该角色会话说明，由其重新提交。`) : true;
+			// 有评审意见时一并提示：结论与各级发现数
+			const review = bb.readReview(file) as { verdict?: string; counts?: { blocking?: number; major?: number; minor?: number } } | undefined;
+			const reviewLine = review
+				? `\n\n评审结论：${review.verdict}（blocking ${review.counts?.blocking ?? 0}，major ${review.counts?.major ?? 0}，minor ${review.counts?.minor ?? 0}）${review.verdict === "revise" ? "。评审员建议先修改：/plan revise。" : ""}`
+				: "\n\n（尚未评审；可先运行 /critique 让评审员审查。）";
+			const ok = ctx.hasUI ? await ctx.ui.confirm("接受提案？", `${summary}${reviewLine}\n\n接受后写入黑板。要修改请回到该角色会话说明，由其重新提交。`) : true;
 			if (!ok) return;
 			try {
 				deps.note(ctx, applyProposal(bb, file));
