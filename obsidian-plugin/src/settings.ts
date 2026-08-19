@@ -18,6 +18,8 @@ export interface PiLearningSettings {
 	extraArgs: string;
 	/** 打开视图时自动启动 pi */
 	autoStart: boolean;
+	/** 启动 pi 时续上本项目最近一次会话（--continue）；关闭则每次新开会话 */
+	resumeLast: boolean;
 }
 
 export const DEFAULT_SETTINGS: PiLearningSettings = {
@@ -27,6 +29,7 @@ export const DEFAULT_SETTINGS: PiLearningSettings = {
 	model: "",
 	extraArgs: "",
 	autoStart: true,
+	resumeLast: true,
 };
 
 export class PiLearningSettingTab extends PluginSettingTab {
@@ -90,6 +93,12 @@ export class PiLearningSettingTab extends PluginSettingTab {
 		new Setting(containerEl).setName("额外参数").setDesc("追加给 pi 的命令行参数，例如 --thinking high。").addText((t) =>
 			t.setValue(s.extraArgs).onChange((v) => {
 				s.extraArgs = v;
+				save();
+			}),
+		);
+		new Setting(containerEl).setName("启动时续上上次会话").setDesc("pi 启动时恢复本项目最近一次会话（--continue）；关闭则每次都是新会话。随时可用顶栏的「历史会话」切换。").addToggle((t) =>
+			t.setValue(s.resumeLast).onChange((v) => {
+				s.resumeLast = v;
 				save();
 			}),
 		);

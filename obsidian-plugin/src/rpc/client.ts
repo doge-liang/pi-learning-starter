@@ -169,6 +169,9 @@ export class PiRpcClient {
 	async newSession(): Promise<{ cancelled: boolean }> {
 		return this.data(await this.send({ type: "new_session" }));
 	}
+	async switchSession(sessionPath: string): Promise<{ cancelled: boolean }> {
+		return this.data(await this.send({ type: "switch_session", sessionPath }));
+	}
 	async getState(): Promise<RpcState> {
 		return this.data(await this.send({ type: "get_state" }));
 	}

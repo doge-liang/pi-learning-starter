@@ -51,6 +51,7 @@ export class LearningView extends ItemView implements ControllerSurface {
 		this.startBtn = this.iconButton(ctl, "play", "启动 / 重启 pi", () => void this.start(true));
 		this.iconButton(ctl, "cpu", "切换模型", () => void this.safely(() => this.controller.pickModel()));
 		this.iconButton(ctl, "brain", "思考等级", () => void this.safely(() => this.controller.pickThinkingLevel()));
+		this.iconButton(ctl, "history", "历史会话", () => void this.safely(() => this.controller.pickSession()));
 		this.iconButton(ctl, "file-plus", "新会话", () => void this.safely(() => this.controller.newSession()));
 		this.abortBtn = this.iconButton(ctl, "square", "中止当前回合", () => void this.safely(() => this.controller.abort()));
 		this.iconButton(ctl, "refresh-cw", "重新加载历史", () => void this.reload());

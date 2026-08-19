@@ -26,6 +26,7 @@ export default class PiLearningPlugin extends Plugin {
 		this.addCommand({ id: "open-view", name: "打开学习面板", callback: () => void this.activateView() });
 		this.addCommand({ id: "restart-pi", name: "重启 pi", callback: () => void this.controller.start().catch((e) => new Notice((e as Error).message)) });
 		this.addCommand({ id: "stop-pi", name: "停止 pi", callback: () => void this.controller.stop() });
+		this.addCommand({ id: "pick-session", name: "切换历史会话", callback: () => void this.activateView().then(() => this.controller.pickSession()).catch((e) => new Notice((e as Error).message)) });
 		for (const [id, name, cmd] of [
 			["learn", "黑板概览（/learn）", "/learn"],
 			["domain", "入学访谈（/domain）", "/domain"],

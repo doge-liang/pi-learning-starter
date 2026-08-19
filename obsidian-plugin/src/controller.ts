@@ -3,7 +3,9 @@
  * 把 RPC 事件分发给当前打开的视图，把扩展 UI 请求渲染成 Obsidian 模态框。
  */
 import { type App, Notice } from "obsidian";
+import { resolve } from "node:path";
 import { locatePi } from "./locate.ts";
+import { describeSession, listSessions } from "./sessions.ts";
 import { PiRpcClient } from "./rpc/client.ts";
 import type { AgentMessage, RpcEvent, RpcState, UiRequest, UiResponse } from "./rpc/types.ts";
 import type { PiLearningSettings } from "./settings.ts";
@@ -65,7 +67,7 @@ export class LearningController {
 		const launch = locatePi(s.piPath, s.nodePath || "node", cwd);
 		if (!launch) throw new Error("找不到 pi：请全局安装 @earendil-works/pi-coding-agent，或在设置里填写 pi 的 dist/cli.js 路径。");
 		this.launchSource = launch.source;
-		const args = ["-a", ...(s.extraArgs ? splitArgs(s.extraArgs) : [])];
+		const args = ["-a", ...(s.resumeLast ? ["-c"] : []), ...(s.extraArgs ? splitArgs(s.extraArgs) : [])];
 		if (s.model?.trim()) args.push("--model", s.model.trim());
 		const client = new PiRpcClient({
 			command: launch.command,
@@ -128,6 +130,31 @@ export class LearningController {
 
 	async loadHistory(): Promise<AgentMessage[]> {
 		return this.requireClient().getMessages();
+	}
+
+	/** 弹出本项目的历史会话列表，选中即切换并重载记录 */
+	async pickSession(): Promise<void> {
+		const client = this.requireClient();
+		const cwd = this.settings().projectDir;
+		const sessions = listSessions(cwd);
+		if (!sessions.length) {
+			new Notice("本项目还没有历史会话。");
+			return;
+		}
+		const current = this.state?.sessionFile ? resolve(this.state.sessionFile) : "";
+		const labels = sessions.map((x) => `${resolve(x.path) === current ? "● " : ""}${describeSession(x)}`);
+		const picked = await selectModal(this.app, "切换到历史会话", labels);
+		if (!picked) return;
+		const target = sessions[labels.indexOf(picked)];
+		if (!target) return;
+		if (resolve(target.path) === current) return;
+		const r = await client.switchSession(target.path);
+		if (r.cancelled) {
+			new Notice("会话切换被取消。");
+			return;
+		}
+		this.statuses.clear();
+		await this.refreshState(true);
 	}
 
 	/** 弹出可用模型列表，选中即切换；记到设置里，下次启动沿用 */
