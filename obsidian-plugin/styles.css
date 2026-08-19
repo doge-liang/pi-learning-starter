@@ -243,3 +243,75 @@
 .pi-learning-model-missing {
 	color: var(--text-warning);
 }
+
+/* 流式渲染：增量块、光标、进行中指示 */
+.pi-learning-stream-block + .pi-learning-stream-block,
+.pi-learning-stream-block + .pi-learning-stream-tail:not(:empty) {
+	margin-top: 0.6em;
+}
+.pi-learning-stream-block > :first-child,
+.pi-learning-stream-tail > :first-child {
+	margin-top: 0;
+}
+.pi-learning-stream-block > :last-child,
+.pi-learning-stream-tail > :last-child {
+	margin-bottom: 0;
+}
+.pi-learning-cursor {
+	display: inline-block;
+	width: 0.55em;
+	height: 1em;
+	margin-left: 1px;
+	vertical-align: -0.15em;
+	background: var(--text-accent);
+	border-radius: 1px;
+	animation: pi-learning-blink 1s steps(2, start) infinite;
+}
+@keyframes pi-learning-blink {
+	to {
+		visibility: hidden;
+	}
+}
+.pi-learning-dots::after {
+	content: "";
+	display: inline-block;
+	width: 1.2em;
+	text-align: left;
+	animation: pi-learning-dots 1.2s steps(4, end) infinite;
+}
+@keyframes pi-learning-dots {
+	0% { content: ""; }
+	25% { content: "."; }
+	50% { content: ".."; }
+	75% { content: "..."; }
+}
+.pi-learning-streaming {
+	border-color: var(--interactive-accent);
+}
+.pi-learning-tool-running {
+	border-style: dashed;
+	border-color: var(--interactive-accent);
+}
+.pi-learning-assistant-body > * + * {
+	margin-top: 6px;
+}
+
+/* 用户消息前的标记（[mode: hint]、[begin-session] 等） */
+.pi-learning-tags {
+	display: flex;
+	flex-wrap: wrap;
+	gap: 4px;
+	margin-bottom: 3px;
+}
+.pi-learning-tag {
+	font-size: var(--font-ui-smaller);
+	font-family: var(--font-monospace);
+	color: var(--text-muted);
+	background: var(--background-modifier-border);
+	border-radius: var(--radius-s);
+	padding: 0 5px;
+	line-height: 1.5;
+}
+.pi-learning-user-md p {
+	white-space: pre-wrap;
+}

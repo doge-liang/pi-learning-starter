@@ -53,7 +53,7 @@ schtasks /Create /SC WEEKLY /D MON,THU /ST 20:00 /TN "pi-learning assess" /TR "c
 
 ## Obsidian 插件（obsidian-plugin/）
 
-把同一套 Agent 嵌进 Obsidian 侧边栏：插件以子进程方式启动 `pi --mode rpc`（工作目录就是本项目），扩展的对话框（确认、选择、单行输入、多行编辑器）经 pi 的扩展 UI 子协议变成 Obsidian 的模态框，`/learn`、`/events` 的黑板输出以卡片显示，bb_* 工具调用默认展开作为回执。学习者在 Obsidian 里对角色说话、点命令条按钮，黑板文件仍在本项目目录（可作为第二个 vault 打开，或按需镜像到主库）。
+把同一套 Agent 嵌进 Obsidian 侧边栏：插件以子进程方式启动 `pi --mode rpc`（工作目录就是本项目），扩展的对话框（确认、选择、单行输入、多行编辑器）经 pi 的扩展 UI 子协议变成 Obsidian 的模态框，`/learn`、`/events` 的黑板输出以卡片显示，bb_* 工具调用默认展开作为回执。学习者在 Obsidian 里对角色说话、点命令条按钮，黑板文件仍在本项目目录（可作为第二个 vault 打开，或按需镜像到主库）。渲染用 Obsidian 自带的 MarkdownRenderer（与笔记同一套主题、数学、代码高亮），流式输出按块增量：已完成的段落只渲染一次，只重绘末尾未完成的块并临时闭合未结束的代码围栏，工具与思考块就地更新，折叠状态不丢。
 
 ```
 cd obsidian-plugin
