@@ -236,7 +236,7 @@ export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
 		if (!localRel && url) {
 			const ok = await ctx.ui.confirm(
 				"下载这份资料？",
-				`${source.title}\n获取等级：${ACCESS_LABEL[source.access ?? "unknown"]}\n${url}\n\n保存到 ${libraryDirRel(cfg.library)}/。请先确认这是合法的公开获取渠道；付费墙与盗版站点不要下载。`,
+				`${source.title}\n获取等级：${ACCESS_LABEL[source.access ?? "unknown"]}\n${url}\n\n保存到 ${libraryDirRel(cfg.library)}/。`,
 			);
 			if (ok) {
 				try {

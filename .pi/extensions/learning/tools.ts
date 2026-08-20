@@ -300,7 +300,7 @@ ${summary}
 							description: "获取等级：open 开放获取 / campus 需机构或图书馆权限 / paid 需购买 / physical 纸质馆藏 / unavailable 暂无渠道 / unknown 未判定",
 						}),
 					),
-					acquire_note: Type.Optional(Type.String({ description: "怎么拿到：开放获取版本的完整 URL、图书馆检索式、课程页面、购买渠道。不要指向盗版站点。" })),
+					acquire_note: Type.Optional(Type.String({ description: "怎么拿到：开放获取版本的完整 URL、图书馆检索式、课程页面、购买渠道。" })),
 					meta: Type.Optional(
 						Type.Object(
 							{
