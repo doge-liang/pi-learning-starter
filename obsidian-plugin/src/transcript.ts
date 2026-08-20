@@ -330,7 +330,7 @@ export class Transcript {
 					for (const t of tags) row.createSpan({ cls: "pi-learning-tag", text: t });
 				}
 				if (rest.trim()) {
-					const body = el.createDiv({ cls: "pi-learning-md pi-learning-user-md" });
+					const body = el.createDiv({ cls: "pi-learning-md pi-learning-user-md markdown-rendered" });
 					void MarkdownRenderer.render(this.app, rest, body, "", this.component);
 				}
 				break;
@@ -348,7 +348,7 @@ export class Transcript {
 				break;
 			case "custom": {
 				el.createDiv({ cls: "pi-learning-role", text: b.customType });
-				const body = el.createDiv({ cls: "pi-learning-md" });
+				const body = el.createDiv({ cls: "pi-learning-md markdown-rendered" });
 				void MarkdownRenderer.render(this.app, b.text, body, "", this.component);
 				break;
 			}
@@ -398,7 +398,7 @@ export class Transcript {
 		const existing = partEl(p);
 		if (existing) return existing;
 		if (p.type === "text") {
-			p.el = body.createDiv({ cls: "pi-learning-md" });
+			p.el = body.createDiv({ cls: "pi-learning-md markdown-rendered" });
 			p.md = new StreamingMarkdown(this.app, this.component, p.el);
 			return p.el;
 		}

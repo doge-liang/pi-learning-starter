@@ -87,6 +87,15 @@
 	flex-direction: column;
 	gap: 8px;
 }
+
+/* Obsidian 对 body 设了 user-select: none，只在编辑器/阅读视图恢复；
+   自定义视图需要自行恢复，否则气泡内容无法选中复制 */
+.pi-learning-transcript,
+.pi-learning-widgets,
+.pi-learning-modal-body {
+	user-select: text;
+	-webkit-user-select: text;
+}
 .pi-learning-block {
 	border-radius: var(--radius-m);
 	padding: 6px 10px;
@@ -124,6 +133,32 @@
 }
 .pi-learning-md pre {
 	white-space: pre-wrap;
+}
+/* 气泡字号是 --font-ui-small，主题的标题字号变量可能调得很小，
+   导致标题与正文几乎无差别；这里给一个成比例的层级下限 */
+.pi-learning-md.markdown-rendered h1 {
+	font-size: 1.5em;
+}
+.pi-learning-md.markdown-rendered h2 {
+	font-size: 1.35em;
+}
+.pi-learning-md.markdown-rendered h3 {
+	font-size: 1.2em;
+}
+.pi-learning-md.markdown-rendered h4 {
+	font-size: 1.1em;
+}
+.pi-learning-md.markdown-rendered h5,
+.pi-learning-md.markdown-rendered h6 {
+	font-size: 1em;
+}
+.pi-learning-md.markdown-rendered h1,
+.pi-learning-md.markdown-rendered h2,
+.pi-learning-md.markdown-rendered h3,
+.pi-learning-md.markdown-rendered h4,
+.pi-learning-md.markdown-rendered h5,
+.pi-learning-md.markdown-rendered h6 {
+	margin: 0.7em 0 0.3em 0;
 }
 .pi-learning-note {
 	border-left: 3px solid var(--interactive-accent);
