@@ -213,7 +213,7 @@ export class Blackboard {
 	domain(): Domain {
 		return this.readJson<Domain>("domain.json", {});
 	}
-	/** 入学访谈写入：按提交内容覆盖，未提交的字段与 preferences 中未提及的键保留 */
+	/** 画像写入（/placement 的画像对话）：按提交内容覆盖，未提交的字段与 preferences 中未提及的键保留 */
 	saveDomain(patch: Domain): Domain {
 		const prev = this.domain();
 		const merged: Domain = { ...prev, ...patch, preferences: { ...(prev.preferences ?? {}), ...(patch.preferences ?? {}) } };

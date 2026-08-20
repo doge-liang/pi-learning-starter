@@ -3,7 +3,7 @@
  *
  * 结构映射（设计稿 → pi）：
  * - 黑板              → 项目里的 blackboard/ 目录（blackboard.ts）
- * - 六个角色          → 六段系统提示 + 各自的工具白名单（roles.ts），通过 before_agent_start 注入
+ * - 七个角色          → 七段系统提示 + 各自的工具白名单（roles.ts），通过 before_agent_start 注入
  * - 规则在代码        → bb_* 工具内部的状态机与阈值（tools.ts、blackboard.ts）
  * - 角色会话隔离      → pi 会话：流程命令用 ctx.newSession 切换，角色经交接文件传递（state.ts）
  * - 学习者交互        → 斜杠命令 + ctx.ui 对话框（commands.ts）

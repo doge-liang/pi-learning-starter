@@ -84,7 +84,7 @@ npm install --ignore-scripts    # 安装 pi 及其类型定义（devDependencies
 npm run check                   # tsc --strict + node --test
 ```
 
-测试（`tests/`）不调用模型：`workflow.test.ts` 用伪造的 ExtensionAPI 跑通五个流程（入学访谈、规划提案与接受、资料提案与接受、资料核验、陪读会话的预问题、闭卷作答、术语表、证据与状态迁移、评审、出题、作答、批改与升降级、校准、事件分发、增量重规划、会话切换交接与恢复、护栏），断言黑板文件与状态；`load.test.ts` 用 pi 自己的加载器加载扩展；`scripts.test.ts` 检验定时出题的判定。改动扩展后在 pi 里 `/reload` 即可生效；也可以直接让 pi 修改它自己的扩展（无角色时 pi 是普通编码助手）。
+测试（`tests/`）不调用模型：`workflow.test.ts` 用伪造的 ExtensionAPI 跑通五个流程（水平测试的画像与诊断、规划提案与接受、资料提案与接受、资料核验、陪读会话的预问题、闭卷作答、术语表、证据与状态迁移、评审、出题、作答、批改与升降级、校准、事件分发、增量重规划、会话切换交接与恢复、护栏），断言黑板文件与状态；`load.test.ts` 用 pi 自己的加载器加载扩展；`scripts.test.ts` 检验定时出题的判定。改动扩展后在 pi 里 `/reload` 即可生效；也可以直接让 pi 修改它自己的扩展（无角色时 pi 是普通编码助手）。
 
 ## 目录
 

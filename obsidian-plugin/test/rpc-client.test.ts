@@ -95,7 +95,7 @@ describe("PiRpcClient 对真实 pi", { skip: launch ? false : "本机找不到 p
 		await waitFor(() => uiRequests.some((r) => r.method === "notify" && (r.message ?? "").includes("不在 concepts.json")));
 	});
 
-	it("/role intake 原地进入角色：收到 setStatus；/role none 清除", async () => {
+	it("/role placement 原地进入角色：收到 setStatus；/role none 清除", async () => {
 		await client.prompt("/role placement");
 		await waitFor(() => uiRequests.some((r) => r.method === "setStatus" && r.statusKey === "learning" && (r.statusText ?? "").includes("水平测试官")));
 		await client.prompt("/role none");

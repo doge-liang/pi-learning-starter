@@ -17,7 +17,7 @@ pi 也有两处需要绕开的地方。它没有内置调度，因此定时触�
 | 判断在模型、规则在代码 | `pi.registerTool` 注册的 bb_* 工具，规则在 `execute` 内 | `tools.ts` |
 | 事件条目 | `blackboard/events.jsonl`；`/events` `/dispatch` 命令分发 | `blackboard.ts`、`commands.ts` |
 | 角色会话隔离 | `ctx.newSession` 切换会话，目标角色经交接文件传递；`--name` 命名会话 | `state.ts`、`commands.ts` |
-| 学习者交互（入学访谈、闭卷作答、术语表、资料核验、产出物、复盘） | 斜杠命令 + `ctx.ui.editor` / `ctx.ui.select` / `ctx.ui.confirm`；学习者不手改黑板文件 | `commands.ts` |
+| 学习者交互（画像对话、水平测试、闭卷作答、术语表、资料核验、产出物、复盘） | 斜杠命令 + `ctx.ui.editor` / `ctx.ui.select` / `ctx.ui.confirm`；学习者不手改黑板文件 | `commands.ts` |
 | 陪读老师的模式标记 | `input` 事件为学习者消息加前缀 `[mode: hint]` | `index.ts` |
 | 禁止读原始对话、禁止直接写文件 | `tool_call` 事件返回 `{ block: true }` | `index.ts` |
 | 定时触发 | `LEARN_ROLE=assessor pi -p -a "..."` + cron | `scripts/` |
