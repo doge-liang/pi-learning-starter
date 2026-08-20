@@ -5,5 +5,12 @@
     "librarian": "anthropic/claude-sonnet-5",
     "tutor": "anthropic/claude-sonnet-5",
     "reviewer": "anthropic/claude-sonnet-5"
+  },
+  "library": {
+    "dir": "blackboard/library",
+    "max_mb": 64
+  },
+  "zotero": {
+    "mode": "file"
   }
 }

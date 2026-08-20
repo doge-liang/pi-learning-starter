@@ -5,10 +5,14 @@
  * 目标角色通过交接文件传给新的扩展实例（见 state.ts）。当前会话尚无消息时则直接在原地进入角色。
  */
 import { existsSync, readFileSync, statSync } from "node:fs";
-import { resolve } from "node:path";
+import { isAbsolute, join, relative, resolve } from "node:path";
 import type { ExtensionAPI, ExtensionCommandContext } from "@earendil-works/pi-coding-agent";
-import { type Blackboard, today } from "./blackboard.ts";
+import { ACCESS_LABEL, type Acquisition, type Blackboard, today } from "./blackboard.ts";
+import { readConfig } from "./config.ts";
+import { acquireBrief, download, downloadableUrl, libraryDirRel, libraryReport } from "./library.ts";
+import { pushToRemote } from "./remote.ts";
 import { kickoff, ROLES } from "./roles.ts";
+import { saveToZotero } from "./zotero.ts";
 import { type LearnerAnswer, type LearningState, type Role, ROLE_NAMES, writeHandoff, takeHandoff } from "./state.ts";
 import { applyProposal } from "./tools.ts";
 
@@ -163,10 +167,151 @@ export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
 			const [unit, ...rest] = args.trim().split(/\s+/).filter(Boolean);
 			const note = rest.join(" ");
 			const units = unit ? [unit] : bb.units().filter((u) => !u.sources?.length).map((u) => u.id);
-			if (!units.length) return ctx.ui.notify("所有单元都已有资料；要请求替代资料请指定单元与障碍说明。", "info");
+			if (!units.length) return ctx.ui.notify("所有单元都已有资料；要请求替代资料请指定单元与障碍说明，要整理馆藏请运行 /curate。", "info");
 			await enter(ctx, "librarian", { unit }, `librarian ${today()}`, kickoff("librarian", { units, unit, note: note || undefined }));
 		},
 	});
+
+	pi.registerCommand("curate", {
+		description: "资料管理员：整理馆藏（合并重复、下线失效、排定阅读顺序、打标签、列出缺口）；/curate [unit]",
+		getArgumentCompletions: (prefix) => {
+			const items = bb.units().filter((u) => u.id.startsWith(prefix)).map((u) => ({ value: u.id, label: `${u.id} ${u.title}` }));
+			return items.length ? items : null;
+		},
+		handler: async (args, ctx) => {
+			if (!bb.sources().length) return ctx.ui.notify("馆藏为空；先运行 /sources 选材。", "warning");
+			const unit = args.trim() || undefined;
+			await enter(ctx, "librarian", { unit }, `librarian curate ${today()}`, kickoff("librarian", { curate: true, unit }));
+		},
+	});
+
+	pi.registerCommand("library", {
+		description: "馆藏概览：按单元列出资料、获取与核验状态、本地副本与入库情况、覆盖缺口；/library [unit]",
+		getArgumentCompletions: (prefix) => {
+			const items = bb.units().filter((u) => u.id.startsWith(prefix)).map((u) => ({ value: u.id, label: `${u.id} ${u.title}` }));
+			return items.length ? items : null;
+		},
+		handler: async (args, ctx) => {
+			if (!bb.sources().length) return ctx.ui.notify("馆藏为空；先运行 /sources 选材。", "info");
+			deps.note(ctx, libraryReport(bb, ctx.cwd, readConfig(ctx.cwd).library, args.trim() || undefined));
+		},
+	});
+
+	pi.registerCommand("collect", {
+		description: "获取一份资料并登记：下载或填写本地路径，可选入 Zotero 与网盘；/collect <资料id>",
+		getArgumentCompletions: (prefix) => {
+			const items = bb
+				.activeSources()
+				.filter((s) => s.acquisition?.status !== "obtained" && s.id.startsWith(prefix))
+				.map((s) => ({ value: s.id, label: `${s.id} ${s.title}` }));
+			return items.length ? items : null;
+		},
+		handler: async (args, ctx) => runCollect(args.trim(), ctx),
+	});
+
+	/**
+	 * 收集一份资料：呈现获取清单 → 取得本地副本（下载或学习者自己给路径）→ 可选入 Zotero 与网盘 → 登记台账。
+	 * 下载与入库都是对外动作，每一步都先经确认框；模型没有进入这条路径的入口。
+	 */
+	async function runCollect(idArg: string, ctx: ExtensionCommandContext): Promise<void> {
+		if (!ctx.hasUI) return ctx.ui.notify("该命令需要交互界面（下载与入库都要逐步确认）。", "warning");
+		const cfg = readConfig(ctx.cwd);
+		let id = idArg;
+		if (!id) {
+			const pending = bb.activeSources().filter((s) => s.acquisition?.status !== "obtained");
+			if (!pending.length) return ctx.ui.notify("在架资料都已登记为已获取。", "info");
+			const pick = await ctx.ui.select("选择要获取的资料", pending.map((s) => `${s.id}  ${s.title}`));
+			if (!pick) return;
+			id = pick.split(/\s+/)[0];
+		}
+		const source = bb.sources().find((x) => x.id === id);
+		if (!source) return ctx.ui.notify(`资料 ${id} 不在 sources.json 中。`, "warning");
+		deps.note(ctx, acquireBrief(source));
+
+		const patch: Partial<Acquisition> = {};
+		let localRel = source.acquisition?.local_path;
+
+		// 1. 本地副本：先试直链下载，失败或没有直链时让学习者给出自己已获取的路径
+		const url = downloadableUrl(source);
+		if (!localRel && url) {
+			const ok = await ctx.ui.confirm(
+				"下载这份资料？",
+				`${source.title}\n获取等级：${ACCESS_LABEL[source.access ?? "unknown"]}\n${url}\n\n保存到 ${libraryDirRel(cfg.library)}/。请先确认这是合法的公开获取渠道；付费墙与盗版站点不要下载。`,
+			);
+			if (ok) {
+				try {
+					const d = await download(url, { cwd: ctx.cwd, cfg: cfg.library, id: source.id, signal: ctx.signal });
+					localRel = d.rel;
+					ctx.ui.notify(
+						`已下载 ${d.rel}（${(d.bytes / 1024).toFixed(0)} KB）${d.looksLikeLandingPage ? "；返回的是 HTML 页面，可能只是落地页而非资料本身，请打开确认" : ""}`,
+						d.looksLikeLandingPage ? "warning" : "info",
+					);
+				} catch (e) {
+					ctx.ui.notify(`下载失败：${(e as Error).message}`, "warning");
+				}
+			}
+		}
+		if (!localRel) {
+			const p = await ctx.ui.input("本地文件路径（已自行获取时填写；留空则只登记获取状态）", "例如 D:/books/deep-learning.pdf");
+			if (p?.trim()) {
+				const rel = toProjectRelative(ctx.cwd, p.trim());
+				if (!existsSync(absolutize(ctx.cwd, rel))) ctx.ui.notify(`路径不存在，仍按你填的登记：${rel}`, "warning");
+				localRel = rel;
+			}
+		}
+
+		// 2. 获取状态：有本地副本即已获取；纸质书等没有文件的情形由学习者自己选
+		if (localRel) {
+			patch.status = "obtained";
+			patch.local_path = localRel;
+		} else {
+			const pick = await ctx.ui.select("登记获取状态", ["obtained  已获取（纸质书或已存在别处）", "pending  还没拿到", "unavailable  暂无渠道"]);
+			if (!pick) return;
+			patch.status = pick.split(/\s+/)[0] as Acquisition["status"];
+		}
+		const localAbs = localRel ? absolutize(ctx.cwd, localRel) : undefined;
+
+		// 3. Zotero：未配置时走 file 模式写 CSL-JSON，学习者在 Zotero 里导入
+		const zoteroMode = cfg.zotero?.mode ?? "file";
+		if (patch.status === "obtained") {
+			const ok = await ctx.ui.confirm(
+				"把题录送进 Zotero？",
+				`${source.title}\n模式：${zoteroMode}${zoteroMode === "file" ? "（写出 CSL-JSON，之后在 Zotero 里「文件 → 导入」）" : zoteroMode === "connector" ? "（本地 Zotero 桌面端需正在运行）" : "（Zotero Web API，会上传本地副本作为附件）"}`,
+			);
+			if (ok) {
+				try {
+					const r = await saveToZotero(source, { cwd: ctx.cwd, cfg: cfg.zotero, library: cfg.library, localAbs, signal: ctx.signal });
+					patch.zotero = { mode: r.mode, key: r.key, file: r.file, at: today() };
+					ctx.ui.notify(r.message, "info");
+				} catch (e) {
+					ctx.ui.notify(`Zotero 入库失败：${(e as Error).message}`, "warning");
+				}
+			}
+		}
+
+		// 4. 网盘：只有存在本地副本且配置了目标时才提议
+		if (localAbs && cfg.remote?.mode) {
+			const ok = await ctx.ui.confirm("把本地副本送进网盘？", `${localRel}\n模式：${cfg.remote.mode}${cfg.remote.mode === "folder" ? `　目录：${cfg.remote.dir ?? "（未配置）"}` : `　地址：${cfg.remote.url ?? "（未配置）"}`}`);
+			if (ok) {
+				try {
+					const r = await pushToRemote(source, localAbs, { cfg: cfg.remote, signal: ctx.signal });
+					patch.remote = { provider: r.provider, path: r.path, at: today() };
+					ctx.ui.notify(r.message, "info");
+				} catch (e) {
+					ctx.ui.notify(`网盘入库失败：${(e as Error).message}`, "warning");
+				}
+			}
+		}
+
+		patch.at = today();
+		bb.recordAcquisition(id, patch);
+		ctx.ui.notify(
+			patch.status === "obtained"
+				? `已登记 ${id} 为已获取${localRel ? `（${localRel}）` : ""}。亲自打开确认后运行 /verify ${id}。`
+				: `已登记 ${id} 的获取状态为 ${patch.status}。${patch.status === "unavailable" ? `换一份更易得的资料：/sources ${source.for_units?.[0] ?? ""} 拿不到这份资料` : ""}`,
+			"info",
+		);
+	}
 
 	pi.registerCommand("read", {
 		description: "陪读老师：开始某单元的阅读会话（缺省为当前单元）",
@@ -360,7 +505,7 @@ export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
 	});
 
 	pi.registerCommand("dispatch", {
-		description: "处理第一条未处理事件：structure_ready/resource_request → 馆员；unit_complete/errors_threshold → 考评官；replan_request → 规划者",
+		description: "处理第一条未处理事件：structure_ready/resource_request/sources_gap → 馆员；unit_complete/errors_threshold → 考评官；replan_request → 规划者",
 		handler: async (_args, ctx) => {
 			const ev = bb.unhandledEvents()[0];
 			if (!ev) return ctx.ui.notify("没有未处理事件。", "info");
@@ -376,6 +521,12 @@ export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
 				case "resource_request": {
 					const unit = String(ev.payload.unit ?? "");
 					return enter(ctx, "librarian", { unit }, `librarian alt ${unit}`, kickoff("librarian", { unit, note: String(ev.payload.note ?? "未说明") }));
+				}
+				case "sources_gap": {
+					// 整段单元缺资料 → 补料（新提案）；只是概念没被覆盖 → 整理并列出缺口
+					const units = Array.isArray(ev.payload.units) ? (ev.payload.units as string[]) : [];
+					if (units.length) return enter(ctx, "librarian", {}, `librarian gap ${today()}`, kickoff("librarian", { units }));
+					return enter(ctx, "librarian", {}, `librarian curate ${today()}`, kickoff("librarian", { curate: true }));
 				}
 				case "unit_complete":
 				case "errors_threshold":
@@ -407,6 +558,17 @@ export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
 			ctx.ui.notify(`已进入 ${ROLES[r as Role].label}。`, "info");
 		},
 	});
+}
+
+/** 项目内的路径统一存成相对项目根的 POSIX 形式，项目外的保持绝对路径（黑板要能跨机器读） */
+function toProjectRelative(cwd: string, p: string): string {
+	const abs = isAbsolute(p) ? p : resolve(cwd, p);
+	const rel = relative(cwd, abs);
+	return rel && !rel.startsWith("..") && !isAbsolute(rel) ? rel.split(/[\\/]/).join("/") : abs;
+}
+
+function absolutize(cwd: string, p: string): string {
+	return isAbsolute(p) ? p : join(cwd, p);
 }
 
 /** 逐题弹出编辑器与信心选择；任一步取消则返回 null */

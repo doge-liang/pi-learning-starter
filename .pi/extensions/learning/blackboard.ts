@@ -50,6 +50,45 @@ export interface Unit {
 	sources?: string[];
 	status?: "pending" | "active" | "done";
 }
+/** 获取等级：拿到这份资料要付出什么代价，决定 /collect 能否直接下载 */
+export const ACCESS_LEVELS = ["open", "campus", "paid", "physical", "unavailable", "unknown"] as const;
+export type AccessLevel = (typeof ACCESS_LEVELS)[number];
+export const ACCESS_LABEL: Record<AccessLevel, string> = {
+	open: "开放获取",
+	campus: "需机构或图书馆权限",
+	paid: "需购买",
+	physical: "纸质馆藏",
+	unavailable: "暂无渠道",
+	unknown: "未判定",
+};
+
+/** 题录元数据：既供检索，也是 Zotero 入库的字段来源 */
+export interface SourceMeta {
+	authors?: string[];
+	year?: number;
+	publisher?: string;
+	edition?: string;
+	/** 期刊名、丛书名或课程名 */
+	container?: string;
+	pages?: string;
+	doi?: string;
+	isbn?: string;
+	/** 可直接获取的 URL，优先填开放获取版本 */
+	url?: string;
+	language?: string;
+}
+
+/** 收集台账：学习者侧的登记，模型没有写入这些字段的路径（只有 /collect 命令有） */
+export interface Acquisition {
+	status: "pending" | "obtained" | "unavailable";
+	/** 本地副本路径，相对项目根 */
+	local_path?: string;
+	at?: string;
+	zotero?: { mode: string; key?: string; file?: string; at: string };
+	remote?: { provider: string; path: string; at: string };
+	note?: string;
+}
+
 export interface Source {
 	id: string;
 	title: string;
@@ -62,7 +101,31 @@ export interface Source {
 	alternative?: boolean;
 	verified?: boolean;
 	reachable?: boolean;
+	/** 以下由资料管理员在提案中给出 */
+	access?: AccessLevel;
+	acquire_note?: string;
+	meta?: SourceMeta;
+	tags?: string[];
+	/** 单元内的阅读顺序（整理提案排定） */
+	order?: number;
+	retired?: boolean;
+	retired_reason?: string;
+	/** 以下由学习者用 /collect 登记 */
+	acquisition?: Acquisition;
 }
+export type ProposalKind = "plan" | "sources" | "curate";
+
+/** 整理提案：只改索引（合并、下线、排序、标签）与缺口记录，不动本地文件 */
+export interface CurateProposal {
+	kind: "curate";
+	retire?: Array<{ id: string; reason: string }>;
+	merge?: Array<{ keep: string; drop: string[]; reason: string }>;
+	reorder?: Array<{ unit: string; order: string[] }>;
+	tag?: Array<{ id: string; tags: string[] }>;
+	gaps?: Array<{ scope: "unit" | "concept"; id: string; note: string; suggestion?: string }>;
+	notes?: string;
+}
+
 export interface PlacementSummary {
 	date: string;
 	overall: number;
@@ -249,6 +312,22 @@ export class Blackboard {
 		return s;
 	}
 
+	/** 收集台账登记（只有 /collect 命令调用）：按字段合并，未提交的字段保留 */
+	recordAcquisition(id: string, patch: Partial<Acquisition>): Source | undefined {
+		const sources = this.sources();
+		const s = sources.find((x) => x.id === id);
+		if (!s) return undefined;
+		const prev: Acquisition = s.acquisition ?? { status: "pending" };
+		s.acquisition = { ...prev, ...patch, status: patch.status ?? prev.status };
+		this.saveSources(sources);
+		return s;
+	}
+
+	/** 在架资料（排除已下线的），供上下文、概览与命令使用 */
+	activeSources(): Source[] {
+		return this.sources().filter((s) => !s.retired);
+	}
+
 	conceptIndex(): Map<string, Concept> {
 		return new Map(this.concepts().map((c) => [c.id, c]));
 	}
@@ -390,7 +469,7 @@ export class Blackboard {
 
 	// ---------- 提案文件 ----------
 
-	writeProposal(kind: "plan" | "sources", data: unknown): string {
+	writeProposal(kind: ProposalKind, data: unknown): string {
 		return this.writeJson(join("proposals", `${kind}-${stamp()}.json`), data);
 	}
 
@@ -398,7 +477,7 @@ export class Blackboard {
 	 * 最近一份尚未接受的提案（绝对路径）。按修改时间而非文件名排序：
 	 * plan-* 与 sources-* 按名字排序会让资料提案永远压在规划提案之后。
 	 */
-	latestProposal(kind?: "plan" | "sources"): string | undefined {
+	latestProposal(kind?: ProposalKind): string | undefined {
 		// 排除已接受的提案与评审文件（x.review.json 与提案同目录同前缀）
 		const files = this.listFiles("proposals", kind ? `${kind}-` : "", ".json").filter((f) => !f.endsWith(".accepted.json") && !f.endsWith(".review.json"));
 		if (!files.length) return undefined;
@@ -409,11 +488,29 @@ export class Blackboard {
 	}
 
 	/** 提案的可读摘要：供工具返回值与 /accept 的确认框使用，让学习者不必打开 JSON 文件审阅 */
-	summarizeProposal(data: { concepts?: Concept[]; units?: Unit[]; notes?: string; sources?: Source[] }): string {
+	summarizeProposal(data: { kind?: string; concepts?: Concept[]; units?: Unit[]; notes?: string; sources?: Source[] } & Partial<CurateProposal>): string {
+		if (data.kind === "curate") {
+			const names = new Map(this.sources().map((s) => [s.id, s.title]));
+			const label = (id: string) => `${id}${names.has(id) ? `（${names.get(id)}）` : ""}`;
+			return [
+				`资料整理提案：下线 ${data.retire?.length ?? 0}，合并 ${data.merge?.length ?? 0}，排序 ${data.reorder?.length ?? 0}，标签 ${data.tag?.length ?? 0}，缺口 ${data.gaps?.length ?? 0}`,
+				...(data.retire ?? []).map((r) => `- 下线 ${label(r.id)}：${r.reason}`),
+				...(data.merge ?? []).map((m) => `- 合并 ${m.drop.map(label).join("、")} → ${label(m.keep)}：${m.reason}`),
+				...(data.reorder ?? []).map((r) => `- ${r.unit} 阅读顺序：${r.order.join(" → ")}`),
+				...(data.tag ?? []).map((t) => `- 标签 ${label(t.id)}：${t.tags.join("、")}`),
+				...(data.gaps ?? []).map((g) => `- 缺口（${g.scope === "unit" ? "单元" : "概念"} ${g.id}）：${g.note}${g.suggestion ? `　建议：${g.suggestion}` : ""}`),
+				data.notes ? `依据：${data.notes}` : "",
+			]
+				.filter(Boolean)
+				.join("\n");
+		}
 		if (Array.isArray(data.sources)) {
 			return [
 				`资料提案：${data.sources.length} 份`,
-				...data.sources.map((s) => `- ${s.id}｜${s.title}｜${s.type ?? "?"}｜${s.locator ?? "?"}｜约 ${s.est_minutes ?? "?"} 分钟 → 单元 ${(s.for_units ?? []).join(", ") || "无"}${s.alternative ? "（替代）" : ""}`),
+				...data.sources.map(
+					(s) =>
+						`- ${s.id}｜${s.title}｜${s.type ?? "?"}｜${s.locator ?? "?"}｜${ACCESS_LABEL[s.access ?? "unknown"]}｜约 ${s.est_minutes ?? "?"} 分钟 → 单元 ${(s.for_units ?? []).join(", ") || "无"}${s.alternative ? "（替代）" : ""}`,
+				),
 			].join("\n");
 		}
 		const concepts = data.concepts ?? [];
@@ -538,12 +635,18 @@ export function acceptPlan(bb: Blackboard, proposal: { concepts?: Concept[]; uni
 	return { concepts: merged.length, units: units.length };
 }
 
-/** 把 sources 提案合并进黑板：verified 一律 false，并把资料 id 挂到单元上 */
+/**
+ * 把 sources 提案合并进黑板：verified 一律 false、收集台账保留，并把资料 id 挂到单元上。
+ * 合并后若仍有单元或概念没有资料，发一次 sources_gap 事件（/dispatch 会把它交回馆员）。
+ */
 export function acceptSources(bb: Blackboard, proposal: { sources?: Source[] }): number {
 	const existing = new Map(bb.sources().map((s) => [s.id, s]));
 	const units = bb.units();
 	for (const s of proposal.sources ?? []) {
-		const merged: Source = { ...(existing.get(s.id) ?? {}), ...s, verified: existing.get(s.id)?.verified ?? false };
+		const prev = existing.get(s.id);
+		// verified 与 acquisition 是学习者亲自置位的事实，提案不得覆盖
+		const merged: Source = { ...(prev ?? {}), ...s, verified: prev?.verified ?? false, acquisition: prev?.acquisition };
+		if (!merged.acquisition) delete merged.acquisition;
 		existing.set(s.id, merged);
 		for (const uid of s.for_units ?? []) {
 			const u = units.find((x) => x.id === uid);
@@ -555,6 +658,101 @@ export function acceptSources(bb: Blackboard, proposal: { sources?: Source[] }):
 	}
 	bb.saveSources([...existing.values()]);
 	bb.saveUnits(units);
-	bb.markHandled(["structure_ready", "resource_request"]);
+	bb.markHandled(["structure_ready", "resource_request", "sources_gap"]);
+	emitSourcesGap(bb);
 	return existing.size;
+}
+
+/** 应用整理提案：合并重复、下线失效、排定单元内阅读顺序、打标签、记录缺口。只改索引，不动文件。 */
+export function acceptCurate(bb: Blackboard, p: CurateProposal): { retired: number; merged: number; reordered: number; tagged: number; gaps: number } {
+	const sources = bb.sources();
+	const byId = new Map(sources.map((s) => [s.id, s]));
+	const units = bb.units();
+	const unitsOf = (id: string) => units.filter((u) => u.sources?.includes(id));
+	const retire = (id: string, reason: string): boolean => {
+		const s = byId.get(id);
+		if (!s || s.retired) return false;
+		s.retired = true;
+		s.retired_reason = reason;
+		for (const u of unitsOf(id)) u.sources = (u.sources ?? []).filter((x) => x !== id);
+		return true;
+	};
+
+	// 合并先于下线：被合并的资料要把覆盖范围与所属单元交给保留的那一条，再随之下线
+	let merged = 0;
+	for (const m of p.merge ?? []) {
+		const keep = byId.get(m.keep);
+		if (!keep) continue;
+		for (const dropId of m.drop) {
+			const drop = byId.get(dropId);
+			if (!drop || dropId === m.keep) continue;
+			keep.covers = [...new Set([...(keep.covers ?? []), ...(drop.covers ?? [])])];
+			keep.for_units = [...new Set([...(keep.for_units ?? []), ...(drop.for_units ?? [])])];
+			for (const u of unitsOf(dropId)) {
+				u.sources = (u.sources ?? []).map((x) => (x === dropId ? m.keep : x));
+				u.sources = [...new Set(u.sources)];
+			}
+			retire(dropId, `合并到 ${m.keep}：${m.reason}`);
+			merged++;
+		}
+	}
+
+	let retired = 0;
+	for (const r of p.retire ?? []) if (retire(r.id, r.reason)) retired++;
+
+	let reordered = 0;
+	for (const r of p.reorder ?? []) {
+		const u = units.find((x) => x.id === r.unit);
+		if (!u) continue;
+		const current = u.sources ?? [];
+		const wanted = r.order.filter((id) => current.includes(id) && !byId.get(id)?.retired);
+		u.sources = [...wanted, ...current.filter((id) => !wanted.includes(id))];
+		u.sources.forEach((id, i) => {
+			const s = byId.get(id);
+			if (s) s.order = i + 1;
+		});
+		reordered++;
+	}
+
+	let tagged = 0;
+	for (const t of p.tag ?? []) {
+		const s = byId.get(t.id);
+		if (!s) continue;
+		s.tags = [...new Set(t.tags)];
+		tagged++;
+	}
+
+	bb.saveSources(sources);
+	bb.saveUnits(units);
+	bb.markHandled(["sources_gap"]);
+	// 缺口事件的载荷保持同一形状（units / concepts），/dispatch 才能一视同仁地路由
+	if (p.gaps?.length) {
+		bb.emit("sources_gap", {
+			from: "curate",
+			units: p.gaps.filter((g) => g.scope === "unit").map((g) => g.id),
+			concepts: p.gaps.filter((g) => g.scope === "concept").map((g) => g.id),
+			gaps: p.gaps,
+		});
+	} else emitSourcesGap(bb);
+	return { retired, merged, reordered, tagged, gaps: p.gaps?.length ?? 0 };
+}
+
+/** 单元或概念仍无在架资料时发一次缺口事件；已有未处理的同类事件则不重复 */
+export function emitSourcesGap(bb: Blackboard): void {
+	if (bb.unhandledEvents().some((e) => e.type === "sources_gap")) return;
+	const gap = sourceGaps(bb);
+	if (!gap.units.length && !gap.concepts.length) return;
+	bb.emit("sources_gap", { units: gap.units, concepts: gap.concepts });
+}
+
+/** 无在架资料的单元与概念（概念只统计出现在某个单元里的） */
+export function sourceGaps(bb: Blackboard): { units: string[]; concepts: string[] } {
+	const active = bb.activeSources();
+	const covered = new Set(active.flatMap((s) => s.covers ?? []));
+	const withSource = new Set(active.flatMap((s) => s.for_units ?? []));
+	const units = bb.units();
+	return {
+		units: units.filter((u) => !(u.sources ?? []).some((id) => active.some((s) => s.id === id)) && !withSource.has(u.id)).map((u) => u.id),
+		concepts: [...new Set(units.flatMap((u) => u.concepts ?? []))].filter((c) => !covered.has(c)),
+	};
 }

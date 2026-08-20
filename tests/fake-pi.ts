@@ -29,6 +29,8 @@ export interface UiScript {
 	editor?: Array<string | undefined | ((prefill: string) => string | undefined)>;
 	select?: Array<string | undefined>;
 	confirm?: boolean[];
+	/** 单行输入框（/collect 填本地路径时用） */
+	input?: Array<string | undefined>;
 }
 
 export class FakePi {
@@ -148,7 +150,7 @@ export function makeCtx(pi: FakePi, opts: HarnessOptions): ExtensionCommandConte
 				return typeof v === "function" ? v(prefill) : v;
 			},
 			select: async () => (ui.select ?? []).shift(),
-			input: async () => undefined,
+			input: async () => (ui.input ?? []).shift(),
 			setStatus: (key: string, text: string | undefined) => statuses.set(key, text),
 			setWorkingMessage: () => {},
 			setWidget: () => {},

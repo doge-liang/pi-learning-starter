@@ -9,10 +9,8 @@
  * - 学习者交互        → 斜杠命令 + ctx.ui 对话框（commands.ts）
  * - 定时触发          → LEARN_ROLE=assessor pi -p -a "..."（见 scripts/）
  */
-import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import {
-	CONFIG_DIR_NAME,
 	type ExtensionAPI,
 	type ExtensionContext,
 	getAgentDir,
@@ -20,14 +18,10 @@ import {
 import { Text } from "@earendil-works/pi-tui";
 import { Blackboard, shortHash } from "./blackboard.ts";
 import { registerCommands } from "./commands.ts";
+import { readConfig } from "./config.ts";
 import { buildContext, READ_TOOLS, ROLES } from "./roles.ts";
 import { emptyState, type LearningState, persist as persistState, restore, type Role, ROLE_NAMES, takeHandoff } from "./state.ts";
 import { registerTools } from "./tools.ts";
-
-interface LearningConfig {
-	/** 角色 → "provider/modelId"，例如 { "planner": "anthropic/claude-opus-5" } */
-	models?: Partial<Record<Role, string>>;
-}
 
 export default function (pi: ExtensionAPI) {
 	const bb = new Blackboard(process.cwd());
@@ -36,22 +30,12 @@ export default function (pi: ExtensionAPI) {
 
 	const persist = () => persistState(pi, state);
 
-	function config(cwd: string): LearningConfig {
-		const p = join(cwd, CONFIG_DIR_NAME, "learning.json");
-		if (!existsSync(p)) return {};
-		try {
-			return JSON.parse(readFileSync(p, "utf8")) as LearningConfig;
-		} catch {
-			return {};
-		}
-	}
-
 	/** 进入（或退出）角色：设置工具白名单、模型偏好、会话名与状态栏 */
 	async function applyRole(role: Role | null, partial: Partial<LearningState>, sessionName: string | undefined, ctx: ExtensionContext) {
 		state = { ...state, ...partial, role, contextHash: undefined };
 		if (role) {
 			pi.setActiveTools([...READ_TOOLS, ...ROLES[role].tools]);
-			const pref = config(ctx.cwd).models?.[role];
+			const pref = readConfig(ctx.cwd).models?.[role];
 			if (pref) {
 				const [provider, ...rest] = pref.split("/");
 				const model = ctx.modelRegistry.find(provider, rest.join("/"));
