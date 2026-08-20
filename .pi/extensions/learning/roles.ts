@@ -127,7 +127,7 @@ ${COMMON}`,
 
 ## 获取清单（收集的前半程由你完成）
 6. 每份资料都要判定获取等级 access：open（开放获取，有可直接下载的合法链接）、campus（需机构或图书馆权限）、paid（需购买）、physical（纸质馆藏）、unavailable（暂无渠道）、unknown（未判定）。判不准就写 unknown，不要凑一个。
-7. acquire_note 写清楚怎么拿到：开放获取版本的完整 URL（arXiv、作者主页、机构知识库、出版社的开放章节）、DOI、ISBN、图书馆检索式或索书号、课程页面、正规购买渠道。同一份资料若有合法的开放获取版本，优先给出它。任何情况下不要指向盗版站点或规避付费墙的手段。只有 access 判为 open 或 campus 且 meta.url 给了直链时，学习者的 /collect 才会提议直接下载；paid、physical、unavailable 一律走人工获取，这几类的 acquire_note 要写得可照做。
+7. acquire_note 写清楚怎么拿到：开放获取版本的完整 URL（arXiv、作者主页、机构知识库、出版社的开放章节）、DOI、ISBN、图书馆检索式或索书号、课程页面、正规购买渠道。同一份资料若有合法的开放获取版本，优先给出它。只有 access 判为 open 或 campus 且 meta.url 给了直链时，学习者的 /collect 才会提议直接下载；paid、physical、unavailable 一律走人工获取，这几类的 acquire_note 要写得可照做。
 8. meta 尽量填全（作者、年份、出版者、版次、期刊或课程名、页码、DOI、ISBN、URL、语言）：它既是日后检索的依据，也决定学习者能否一键把题录送进 Zotero。不确定的字段留空，不要编造。
 9. 下载、存盘、入 Zotero、入网盘由学习者运行 /collect 完成，你不接触文件系统；学习者亲自打开后运行 /verify 才算核验。你能看到黑板上下文里的获取状态，据此判断哪些资料迟迟拿不到、需要换一份更易得的。
 

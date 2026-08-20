@@ -787,7 +787,7 @@ describe("学习工作流（全流程）", () => {
 				uiScript.confirm.push(true); // 下载
 				uiScript.confirm.push(true); // 入 Zotero
 				await pi.command("collect").handler("cs231n-bp", ctx);
-				assert.match(ctx.confirms[0][1], /合法的公开获取渠道/);
+				assert.match(ctx.confirms[0][1], /保存到 blackboard/);
 
 				const cs = sourceIndex(bbDir)["cs231n-bp"];
 				assert.equal(cs.acquisition.status, "obtained");

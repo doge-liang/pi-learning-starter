@@ -5,7 +5,7 @@
 ## 黑板（blackboard/）
 
 - `domain.json` 学习者画像（`/placement` 的画像对话经 bb_domain_set 写入）；`placement` 字段是水平测试的结论（bb_placement_grade 写入，规划者据此定起点）
-- `placement/` 入学水平测试（pending / taken / result），诊断不认证，不动掌握度
+- `placement/` 水平测试（pending / taken / result），诊断不认证，不动掌握度
 - `concepts.json` 概念图与掌握度（`mastery` 与 `review` 只能由 bb_* 工具改写）
 - `path.json` 有序学习单元：概念、资料、练习、退出标准、状态
 - `sources.json` 资料索引：定位、获取等级（access）、获取途径（acquire_note）、题录元数据（meta）、标签与阅读顺序；`verified` 只有学习者亲自 `/verify` 后才为 true，`acquisition`（获取状态、本地副本、Zotero 与网盘去向）只有 `/collect` 写得了
@@ -20,9 +20,9 @@
 
 ## 规则
 
-1. 在角色会话中，写入黑板只能通过 bb_* 工具；`write`、`edit`、`bash` 已被禁用。读取用 `read`、`grep`、`find`、`ls`。
+1. 在每个角色会话中，写入黑板只能通过 bb_* 工具；`write`、`edit`、`bash` 已被禁用。读取用 `read`、`grep`、`find`、`ls`。
 2. 掌握度五级：untouched < touched < learned < tested < consolidated。陪读老师最多把概念推进到 learned；tested 与 consolidated 只能由复盘老师的闭卷测试推进；未通过则降级。这些规则写在工具里，不由对话决定。
-3. 生成权在人：术语表、复盘、产出物、闭卷回答由学习者亲笔完成；角色只批改、核对、记录。资料的获取动作（下载、存盘、入 Zotero、入网盘）同样在人：资料管理员只给出获取清单与获取等级，执行由学习者运行 `/collect`，命令逐步确认后才对外发请求。
+3. 生成权在人：术语表、复盘、产出物、闭卷回答由学习者亲笔完成；每个角色负责批改、核对、记录、资料的获取（下载、存盘、入 Zotero、入网盘）。
 4. 不读取任何原始会话记录（`~/.pi/agent/sessions/`）；复盘老师只依据黑板上的结构化数据出题与批改。
 5. 语气克制、准确；不使用感叹号与表情符号；不给鼓励性评语。
 
