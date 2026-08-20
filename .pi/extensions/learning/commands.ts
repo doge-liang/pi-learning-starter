@@ -49,14 +49,6 @@ export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
 		handler: async (_args, ctx) => deps.note(ctx, bb.status()),
 	});
 
-	pi.registerCommand("domain", {
-		description: "学习顾问：入学访谈，通过对话整理领域、目标、背景与偏好并写入 domain.json（再次运行可修改）",
-		handler: async (_args, ctx) => {
-			const existing = Boolean(bb.domain().domain);
-			await enter(ctx, "intake", {}, `intake ${today()}`, kickoff("intake", { existing }));
-		},
-	});
-
 	pi.registerCommand("plan", {
 		description: "领域专家：规划（/plan）、增量重规划（/plan replan）、按评审意见修改最近的提案（/plan revise）",
 		getArgumentCompletions: (prefix) => {
@@ -64,7 +56,7 @@ export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
 			return items.length ? items : null;
 		},
 		handler: async (args, ctx) => {
-			if (!bb.domain().domain) return ctx.ui.notify("还没有学习者画像；请先运行 /domain 完成入学访谈。", "warning");
+			if (!bb.domain().domain) return ctx.ui.notify("还没有学习者画像；请先运行 /placement（先对话确定目标，再测试定位起点）。", "warning");
 			const mode = args.trim();
 			const replan = mode === "replan";
 			const revise = mode === "revise";
@@ -276,11 +268,11 @@ export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
 	});
 
 	pi.registerCommand("placement", {
-		description: "水平测试官：入学诊断测试，按画像出题定位起点；/placement [题数上限]；作答用 /take",
+		description: "水平测试官：先对话确定领域、目标与背景（写入画像），再出诊断题定位起点；/placement [题数上限]；作答用 /take",
 		handler: async (args, ctx) => {
-			if (!bb.domain().domain) return ctx.ui.notify("还没有学习者画像；请先运行 /domain 完成入学访谈。", "warning");
+			const existing = Boolean(bb.domain().domain);
 			const maxItems = Number.parseInt(args.trim(), 10) || 10;
-			await enter(ctx, "placement", {}, `placement generate ${today()}`, kickoff("placement", { maxItems }));
+			await enter(ctx, "placement", {}, `placement ${today()}`, kickoff("placement", { maxItems, existing }));
 		},
 	});
 

@@ -13,7 +13,7 @@ pi 也有两处需要绕开的地方。它没有内置调度，因此定时触�
 | 设计稿元素 | pi 原语 | 落点 |
 | --- | --- | --- |
 | 黑板 | 项目目录里的 `blackboard/`（JSON、JSONL、Markdown） | `blackboard.ts` |
-| 五个角色（加入学访谈的学习顾问、入学诊断的水平测试官、独立的提案评审员） | 系统提示片段（`before_agent_start` 追加）+ `pi.setActiveTools` 白名单 | `roles.ts`、`index.ts` |
+| 五个角色（加定位起点的水平测试官、独立的提案评审员） | 系统提示片段（`before_agent_start` 追加）+ `pi.setActiveTools` 白名单 | `roles.ts`、`index.ts` |
 | 判断在模型、规则在代码 | `pi.registerTool` 注册的 bb_* 工具，规则在 `execute` 内 | `tools.ts` |
 | 事件条目 | `blackboard/events.jsonl`；`/events` `/dispatch` 命令分发 | `blackboard.ts`、`commands.ts` |
 | 角色会话隔离 | `ctx.newSession` 切换会话，目标角色经交接文件传递；`--name` 命名会话 | `state.ts`、`commands.ts` |
@@ -67,7 +67,7 @@ my-learning/
 | 工具 | 角色 | 写入 | 规则 |
 | --- | --- | --- | --- |
 | `bb_status` | 全部 | 无 | 概览 |
-| `bb_domain_set` | 学习顾问 | `domain.json` | 访谈整理后提交；经 `ctx.ui.confirm` 确认才写入；按字段合并，未提交的保留 |
+| `bb_domain_set` | 水平测试官 | `domain.json` | 画像对话整理后提交；经 `ctx.ui.confirm` 确认才写入；按字段合并，未提交的保留 |
 | `bb_placement_create` | 水平测试官 | `placement/pending-*.json` | 按领域与难度阶梯出题；题目领域须在 areas 中 |
 | `bb_placement_grade` | 水平测试官 | `placement/*-result.json`、`domain.json.placement` | 按领域聚合得分（代码）、层级判断与建议（模型）；算校准偏差；不动掌握度 |
 | `bb_plan_propose` | 领域专家 | `proposals/plan-*.json` | 校验前置引用与成环；提案须经 `/accept` 才生效 |
@@ -84,11 +84,11 @@ my-learning/
 
 ### 4.5 命令（commands.ts）
 
-`/learn` 概览；`/domain`（学习顾问会话做入学访谈，`bb_domain_set` 经确认写入 `domain.json`）；`/placement [n]`（水平测试官会话出入学诊断题；`/take` 识别 `placement/` 下的待作答测试并以 `[grade-placement]` 交回水平测试官）；`/plan [replan|revise]`（revise：规划者上下文含待修改的提案与评审意见）；`/critique [file]`（提案评审员会话独立审查最近一份未接受的提案）；`/exemplar <名字>`（编辑器写入 `exemplars/`，作为规划者与评审员的范例输入；扩展另自带一份规划范例与反例，首次规划与修改时注入）；`/accept [file]`（确认框显示提案摘要；接受后改名 `*.accepted.json`）；`/sources [unit] [障碍说明]`；`/verify [id]`（学习者亲自核验资料后置位 `verified`，无参数时从未核验列表选择）；`/read [unit]`；`/hint` `/explain`；`/answer`（逐题弹出多行编辑器与 1 到 5 的信心选择，然后以 `[closed-book answers]` 发给陪读老师）；`/gloss <id>`（编辑器写条目，扩展追加到 `glossary.md`，再以 `[glossary check]` 请老师核对）；`/done`（以 `[end-session]` 请老师调用 `bb_evidence`）；`/artifact <名字>`（编辑器写产出物到 `artifacts/`）；`/review <文件> [unit]`；`/assess [n]`；`/take [file]`（逐题作答与信心，然后以 `[grade]` 交给复盘老师，必要时先切到考评官会话）；`/reflect [file]`（编辑器预填复盘提纲，就地写「我的复盘」）；`/events` `/dispatch`；`/role <name|none>`。命令带参数补全（单元 id、概念 id、资料 id、角色名）。学习者的界面始终是对话与对话框，不要求手改黑板文件；提案工具的返回里带可读摘要，学习者在会话里要求修改即可。
+`/learn` 概览；`/placement [n]`（水平测试官会话：先画像对话——`bb_domain_set` 经确认写入 `domain.json`——再出诊断题；`/take` 识别 `placement/` 下的待作答测试并以 `[grade-placement]` 交回水平测试官）；`/plan [replan|revise]`（revise：规划者上下文含待修改的提案与评审意见）；`/critique [file]`（提案评审员会话独立审查最近一份未接受的提案）；`/exemplar <名字>`（编辑器写入 `exemplars/`，作为规划者与评审员的范例输入；扩展另自带一份规划范例与反例，首次规划与修改时注入）；`/accept [file]`（确认框显示提案摘要；接受后改名 `*.accepted.json`）；`/sources [unit] [障碍说明]`；`/verify [id]`（学习者亲自核验资料后置位 `verified`，无参数时从未核验列表选择）；`/read [unit]`；`/hint` `/explain`；`/answer`（逐题弹出多行编辑器与 1 到 5 的信心选择，然后以 `[closed-book answers]` 发给陪读老师）；`/gloss <id>`（编辑器写条目，扩展追加到 `glossary.md`，再以 `[glossary check]` 请老师核对）；`/done`（以 `[end-session]` 请老师调用 `bb_evidence`）；`/artifact <名字>`（编辑器写产出物到 `artifacts/`）；`/review <文件> [unit]`；`/assess [n]`；`/take [file]`（逐题作答与信心，然后以 `[grade]` 交给复盘老师，必要时先切到考评官会话）；`/reflect [file]`（编辑器预填复盘提纲，就地写「我的复盘」）；`/events` `/dispatch`；`/role <name|none>`。命令带参数补全（单元 id、概念 id、资料 id、角色名）。学习者的界面始终是对话与对话框，不要求手改黑板文件；提案工具的返回里带可读摘要，学习者在会话里要求修改即可。
 
 ### 4.6 五个流程在 pi 中的时序
 
-A 启动与规划：`/domain` → 学习顾问访谈 → `bb_domain_set`（确认后写 `domain.json`）→ `/placement` → 水平测试官出题 → `/take` 闭卷作答 → `bb_placement_grade`（按领域聚合，结论写入 `domain.json.placement`）→ `/plan` → 规划者会话（上下文含 domain、水平测试结果、范例）→ `bb_plan_propose`（返回摘要）→ `/critique` → 评审员会话 → `bb_proposal_review`（发现与结论）→ 如需修改 `/plan revise` → 规划者按意见重新提交 → `/accept` → 写入并发 `structure_ready` → `/sources` 或 `/dispatch` → 馆员会话 → `bb_sources_propose` → `/accept` → 学习者亲自核验资料后 `/verify`。
+A 启动与规划：`/placement` → 水平测试官先做画像对话（`bb_domain_set` 确认后写 `domain.json`），再出诊断题 → `/take` 闭卷作答 → `bb_placement_grade`（按领域聚合，结论写入 `domain.json.placement`）→ `/plan` → 规划者会话（上下文含 domain、水平测试结果、范例）→ `bb_plan_propose`（返回摘要）→ `/critique` → 评审员会话 → `bb_proposal_review`（发现与结论）→ 如需修改 `/plan revise` → 规划者按意见重新提交 → `/accept` → 写入并发 `structure_ready` → `/sources` 或 `/dispatch` → 馆员会话 → `bb_sources_propose` → `/accept` → 学习者亲自核验资料后 `/verify`。
 
 B 阅读会话：`/read u01` → 陪读会话，开场语 `[begin-session]` → `bb_prequestions` → 学习者读资料并提问（消息自动带 `[mode: hint]`）→ `/answer` → 老师批改 → `/gloss` → 老师核对 → `/done` → `bb_evidence`（上限 learned；确认后单元完成并发事件）。
 
@@ -100,7 +100,7 @@ E 调整路径：`replan_request` 事件 → `/dispatch` 或 `/plan replan` → 
 
 ## 5. 安装与首次运行
 
-安装 pi（`npm install -g --ignore-scripts @earendil-works/pi-coding-agent` 或 `curl -fsSL https://pi.dev/install.sh | sh`），设置 `ANTHROPIC_API_KEY` 或在 pi 里 `/login`。解压 starter 到一个目录，进入后运行 `pi`；首次会询问是否信任项目，选择信任（或 `/trust` 保存）。看到「学习工作流已加载」后：`/learn`、`/domain`、`/plan`。角色模型在 `.pi/learning.json` 中配置，形如 `"planner": "anthropic/claude-opus-5"`；未配置则沿用当前模型。改动扩展后 `/reload`。
+安装 pi（`npm install -g --ignore-scripts @earendil-works/pi-coding-agent` 或 `curl -fsSL https://pi.dev/install.sh | sh`），设置 `ANTHROPIC_API_KEY` 或在 pi 里 `/login`。解压 starter 到一个目录，进入后运行 `pi`；首次会询问是否信任项目，选择信任（或 `/trust` 保存）。看到「学习工作流已加载」后：`/learn`、`/placement`、`/plan`。角色模型在 `.pi/learning.json` 中配置，形如 `"planner": "anthropic/claude-opus-5"`；未配置则沿用当前模型。改动扩展后 `/reload`。
 
 非交互与定时：`LEARN_ROLE=assessor pi -p -a "..."`；`-a` 让 print 模式信任项目本地扩展。cron 只做出题，作答仍在交互模式完成。Unix 用 `scripts/assess-cron.sh`；Windows 任务计划程序或任何有 node 的环境用 `scripts/assess-cron.mjs`，它把提示词经 stdin 交给 pi 的 print 模式，避开 shell 对中文与引号的改写。两者都先经 `due-check.mjs` 判定：没有 learned 及以上的概念、或已有待作答的测试时跳过。
 

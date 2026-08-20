@@ -69,7 +69,7 @@ describe("PiRpcClient 对真实 pi", { skip: launch ? false : "本机找不到 p
 		const state = await client.getState();
 		assert.equal(state.isStreaming, false);
 		const names = (await client.getCommands()).map((c) => c.name);
-		for (const n of ["learn", "domain", "plan", "accept", "sources", "verify", "read", "answer", "gloss", "done", "artifact", "review", "assess", "take", "reflect", "events", "dispatch", "role"]) {
+		for (const n of ["learn", "placement", "plan", "critique", "exemplar", "accept", "sources", "verify", "read", "answer", "gloss", "done", "artifact", "review", "assess", "take", "reflect", "events", "dispatch", "role"]) {
 			assert.ok(names.includes(n), `缺少命令 ${n}`);
 		}
 	});
@@ -96,8 +96,8 @@ describe("PiRpcClient 对真实 pi", { skip: launch ? false : "本机找不到 p
 	});
 
 	it("/role intake 原地进入角色：收到 setStatus；/role none 清除", async () => {
-		await client.prompt("/role intake");
-		await waitFor(() => uiRequests.some((r) => r.method === "setStatus" && r.statusKey === "learning" && (r.statusText ?? "").includes("学习顾问")));
+		await client.prompt("/role placement");
+		await waitFor(() => uiRequests.some((r) => r.method === "setStatus" && r.statusKey === "learning" && (r.statusText ?? "").includes("水平测试官")));
 		await client.prompt("/role none");
 		await waitFor(() => uiRequests.some((r) => r.method === "setStatus" && r.statusKey === "learning" && (r.statusText === undefined || r.statusText === null)));
 	});

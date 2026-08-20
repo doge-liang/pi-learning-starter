@@ -375,7 +375,7 @@ export class Blackboard {
 		const pending = this.listFiles("assessments", "pending-", ".json");
 		const pendingPlacement = this.listFiles("placement", "pending-", ".json");
 		return [
-			`领域：${this.domain().domain ?? "（未设置，运行 /domain 开始入学访谈）"}`,
+			`领域：${this.domain().domain ?? "（未设置，运行 /placement 开始）"}`,
 			this.domain().domain ? `水平测试：${this.domain().placement ? `${this.domain().placement!.date} 总分 ${this.domain().placement!.overall}` : "未做（运行 /placement）"}` : "",
 			`掌握度：${LEVELS.map((lv) => `${lv} ${counts[lv]}`).join("  ")}`,
 			unit ? `当前单元：${unit.id} ${unit.title}（${unit.status ?? "pending"}）` : "当前单元：无（先运行 /plan）",

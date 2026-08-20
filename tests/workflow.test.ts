@@ -51,34 +51,34 @@ describe("学习工作流（全流程）", () => {
 	});
 	after(() => project.cleanup());
 
-	it("注册了 13 个 bb_* 工具、23 个命令与 4 个事件处理器", () => {
+	it("注册了 13 个 bb_* 工具、22 个命令与 4 个事件处理器", () => {
 		const bbTools = [...pi.tools.keys()].filter((n) => n.startsWith("bb_"));
 		assert.equal(bbTools.length, 13, bbTools.join(","));
-		assert.equal(pi.commands.size, 23, [...pi.commands.keys()].join(","));
+		assert.equal(pi.commands.size, 22, [...pi.commands.keys()].join(","));
 		assert.deepEqual([...pi.handlers.keys()].sort(), ["before_agent_start", "input", "session_start", "tool_call"]);
 	});
 
-	it("启动时无角色：只从白名单里摘掉 bb_* 工具；未做访谈时提示先 /domain", () => {
+	it("启动时无角色：只从白名单里摘掉 bb_* 工具；无画像时提示先 /placement", () => {
 		assert.deepEqual(pi.activeTools, pi.builtin);
-		assert.ok(ctx.notices.some(([, m]) => m.includes("先运行 /domain")));
+		assert.ok(ctx.notices.some(([, m]) => m.includes("先运行 /placement")));
 	});
 
-	// ------------------------------------------------------------ 流程 0：入学访谈
-	describe("流程 0：入学访谈（/domain）", () => {
-		it("未访谈时 /plan 被拒绝并指向 /domain", async () => {
+	// ------------------------------------------------------------ 流程 0：水平测试（画像 + 诊断）
+	describe("流程 0：水平测试（/placement）", () => {
+		it("无画像时 /plan 被拒绝并指向 /placement", async () => {
 			ctx.notices.length = 0;
 			await pi.command("plan").handler("", ctx);
-			assert.ok(ctx.notices.some(([, m]) => m.includes("/domain")));
+			assert.ok(ctx.notices.some(([, m]) => m.includes("/placement")));
 			assert.equal(pi.activeTools?.includes("bb_plan_propose"), false);
 		});
 
-		it("/domain 进入学习顾问；bb_domain_set 经确认写入 domain.json，取消则不写", async () => {
+		it("无画像时 /placement 以画像对话开场；bb_domain_set 经确认写入 domain.json，取消则不写", async () => {
 			pi.sentMessages.length = 0;
-			await pi.command("domain").handler("", ctx);
-			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.intake.tools]);
-			assert.match(pi.lastMessage(), /^\[begin-intake\] 请开始入学访谈/);
+			await pi.command("placement").handler("", ctx);
+			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.placement.tools]);
+			assert.match(pi.lastMessage(), /^\[begin-placement\] 请开始水平测试：先通过几个问题/);
 			const ctxText = (await contextOf(pi, ctx))?.message?.content ?? "";
-			assert.ok(ctxText.includes("现有 domain.json"));
+			assert.ok(ctxText.includes("现有 domain.json（domain 为空则先做画像对话）"));
 
 			const params = {
 				domain: "深度学习框架内部原理",
@@ -95,7 +95,7 @@ describe("学习工作流（全流程）", () => {
 
 			uiScript.confirm.push(true);
 			const r1 = await pi.tool("bb_domain_set").execute("t", params, undefined, undefined, ctx);
-			assert.match(r1.content[0].text, /\/plan/);
+			assert.match(r1.content[0].text, /第二步.*bb_placement_create/);
 			const d = readJson(join(bbDir, "domain.json"));
 			assert.equal(d.domain, "深度学习框架内部原理");
 			assert.equal(d.weekly_hours, 8);
@@ -103,17 +103,11 @@ describe("学习工作流（全流程）", () => {
 			assert.deepEqual(d.preferences.languages, ["zh", "en"], "未提交的 preferences 键保留种子值");
 		});
 
-		it("再次 /domain 时开场语说明已有内容；bb_domain_set 只在 intake 角色可用", async () => {
-			pi.sentMessages.length = 0;
-			await pi.command("domain").handler("", ctx);
-			assert.match(pi.lastMessage(), /已有内容/);
-		});
-
-		it("/placement 进入水平测试官；bb_placement_create 写 pending；领域不一致被拒", async () => {
+		it("已有画像时 /placement 直接进入出题；bb_placement_create 写 pending；领域不一致被拒", async () => {
 			pi.sentMessages.length = 0;
 			await pi.command("placement").handler("6", ctx);
 			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.placement.tools]);
-			assert.match(pi.lastMessage(), /phase=generate。题数上限 6/);
+			assert.match(pi.lastMessage(), /\[begin-placement\] 画像已有。phase=generate：题数上限 6/);
 			const ctxText = (await contextOf(pi, ctx))?.message?.content ?? "";
 			assert.ok(ctxText.includes("学习者画像（完整）") && ctxText.includes("深度学习框架内部原理"));
 			await assert.rejects(

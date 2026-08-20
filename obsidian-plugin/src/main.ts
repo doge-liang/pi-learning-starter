@@ -29,7 +29,7 @@ export default class PiLearningPlugin extends Plugin {
 		this.addCommand({ id: "pick-session", name: "切换历史会话", callback: () => void this.activateView().then(() => this.controller.pickSession()).catch((e) => new Notice((e as Error).message)) });
 		for (const [id, name, cmd] of [
 			["learn", "黑板概览（/learn）", "/learn"],
-			["domain", "入学访谈（/domain）", "/domain"],
+			["placement", "水平测试（/placement）", "/placement"],
 			["read", "开始阅读（/read）", "/read"],
 			["take", "作答测试（/take）", "/take"],
 			["events", "查看事件（/events）", "/events"],

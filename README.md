@@ -1,6 +1,6 @@
 # pi 学习工作流（starter）
 
-设计稿「五个 Agent 与一块黑板」在 pi 上的最小实现。黑板是 `blackboard/` 目录，五个学习角色（加入学访谈的学习顾问、入学诊断的水平测试官、独立的提案评审员）是八段系统提示加各自的工具白名单，规则写在 `.pi/extensions/learning/` 的 bb_* 工具里，角色会话的隔离靠 pi 的会话机制。完整的设计说明见 [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md)。
+设计稿「五个 Agent 与一块黑板」在 pi 上的最小实现。黑板是 `blackboard/` 目录，五个学习角色（加定位起点的水平测试官、独立的提案评审员）是七段系统提示加各自的工具白名单，规则写在 `.pi/extensions/learning/` 的 bb_* 工具里，角色会话的隔离靠 pi 的会话机制。完整的设计说明见 [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md)。
 
 ## 安装
 
@@ -19,8 +19,7 @@ pi
 
 学习者的界面始终是 pi 里的对话与对话框，不需要手改黑板文件。
 
-1. `/domain` → 学习顾问通过几轮问答整理你的领域、可检验的目标、背景、每周小时数与资料偏好，复述确认后调用 `bb_domain_set`，你在对话框里最终确认写入。以后要改，再运行 `/domain`。
-   然后 `/placement`（建议）→ 水平测试官按画像推断目标预设的前置领域，每个领域按 basic / intermediate / advanced 阶梯出 2 到 4 题；`/take` 闭卷作答并给信心；批改后按领域聚合得分与到达层级，优势、缺口与「给规划者的建议」写进 `domain.json` 的 `placement` 字段。这是诊断不是认证，不动掌握度；规划者据此定起点、跳过已会的、为缺口插补救单元。
+1. `/placement` → 水平测试官先通过几个问题确定你的领域、可检验的目标、背景与每周小时数（`bb_domain_set` 写入画像，你在对话框里确认），随后按画像推断目标预设的前置领域，每个领域按 basic / intermediate / advanced 阶梯出 2 到 4 题；`/take` 闭卷作答并给信心；批改后按领域聚合得分与到达层级，优势、缺口与「给规划者的建议」写进 `domain.json` 的 `placement` 字段。这是诊断不是认证，不动掌握度；规划者据此定起点、跳过已会的、为缺口插补救单元。以后要改画像或重测，再运行 `/placement` 直接说。
 2. `/plan` → 领域专家读取黑板并调用 `bb_plan_propose`；提案摘要会出现在对话里。审查可以交给 Agent：`/critique` 让独立的提案评审员（另一个会话，看不到规划者的对话）逐项检查目标对齐、覆盖与缺口、前置关系、粒度、顺序与负荷、退出标准是否可检验，给出 blocking / major / minor 发现与 accept / revise 结论；`/plan revise` 让规划者按评审意见修改后重新提交。满意后 `/accept`（确认框里显示摘要与评审结论）。想给规划者「好的规划长什么样」的输入：扩展自带一份规划范例与反例（首次规划与修改时注入），你也可以 `/exemplar <名字>` 粘贴自己认可的课程大纲或学习路径，规划者与评审员都会参考。
 3. `/sources` → 资料管理员为每个单元匹配资料，同样在对话里核对后 `/accept`；然后亲自打开每份资料，`/verify <资料id>`（无参数时从未核验列表里选）标记已核验。`verified` 只有这一条路径。
 4. `/read` → 进入当前单元的陪读会话：老师给预问题；你去读资料，卡住了直接提问（默认最小提示，`/explain` 切换讲解）；读完 `/answer` 闭卷作答并给信心；`/gloss <概念id>` 写术语表并请老师核对；`/done` 结束，老师调用 `bb_evidence`，掌握度最多推进到 learned。
@@ -96,7 +95,7 @@ IMPLEMENTATION-PLAN.md            设计与实现方案
 .pi/extensions/learning/
   index.ts                        入口：会话生命周期、系统提示与上下文注入、工具护栏
   state.ts                        会话级状态、持久化、会话切换交接
-  roles.ts                        八个角色的提示、工具白名单、上下文装配、开场语
+  roles.ts                        七个角色的提示、工具白名单、上下文装配、开场语
   exemplars/plan-exemplar.md      规划范例与反例（首次规划与修改时注入规划者、评审员上下文）
   tools.ts                        bb_* 工具（模型改写黑板的唯一入口）
   blackboard.ts                   黑板 I/O、状态机、复习调度、事件、错误日志

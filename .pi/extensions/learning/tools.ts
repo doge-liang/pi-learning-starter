@@ -57,12 +57,12 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
 		},
 	});
 
-	// ------------------------------------------------------------------ 学习顾问（入学访谈）
+	// ------------------------------------------------------------------ 水平测试官：画像
 	pi.registerTool({
 		name: "bb_domain_set",
 		label: "写入学习者画像",
 		description:
-			"入学访谈结束时写入 blackboard/domain.json：领域、可检验的目标、背景、每周小时数、语言、资料偏好。已有字段按提交内容覆盖，未提交的字段保留。写入前学习者在对话框里最终确认。",
+			"水平测试第一步（画像对话）结束时写入 blackboard/domain.json：领域、可检验的目标、背景、每周小时数、语言、资料偏好。已有字段按提交内容覆盖，未提交的字段保留。写入前学习者在对话框里最终确认。",
 		parameters: Type.Object({
 			domain: Type.String({ description: "领域，一句话" }),
 			goal: Type.String({ description: "可检验的目标：学完后能独立做到什么" }),
@@ -79,7 +79,7 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
 		}),
 		executionMode: "sequential",
 		async execute(_id, params, _signal, _onUpdate, ctx) {
-			requireRole(deps.state(), "intake");
+			requireRole(deps.state(), "placement");
 			const summary = [
 				`领域：${params.domain}`,
 				`目标：${params.goal}`,
@@ -95,11 +95,11 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
 			const state = deps.state();
 			state.contextHash = undefined;
 			deps.persist();
-			return text("已写入 blackboard/domain.json。请告诉学习者下一步：建议先运行 /placement 做入学水平测试（规划者会据测得的基线定起点），也可以直接运行 /plan。");
+			return text("已写入 blackboard/domain.json。请继续水平测试的第二步：依据画像出题并调用 bb_placement_create 写入。");
 		},
 	});
 
-	// ------------------------------------------------------------------ 水平测试官（入学诊断）
+	// ------------------------------------------------------------------ 水平测试官：出题与批改
 	pi.registerTool({
 		name: "bb_placement_create",
 		label: "写入水平测试",

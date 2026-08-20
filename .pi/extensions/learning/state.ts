@@ -10,8 +10,8 @@ import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "
 import { join } from "node:path";
 import { CONFIG_DIR_NAME, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-export type Role = "intake" | "placement" | "planner" | "critic" | "librarian" | "tutor" | "reviewer" | "assessor";
-export const ROLE_NAMES: Role[] = ["intake", "placement", "planner", "critic", "librarian", "tutor", "reviewer", "assessor"];
+export type Role = "placement" | "planner" | "critic" | "librarian" | "tutor" | "reviewer" | "assessor";
+export const ROLE_NAMES: Role[] = ["placement", "planner", "critic", "librarian", "tutor", "reviewer", "assessor"];
 
 export interface PreQuestion {
 	id: string;
