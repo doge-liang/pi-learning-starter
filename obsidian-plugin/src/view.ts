@@ -71,7 +71,8 @@ export class LearningView extends ItemView implements ControllerSurface {
 
 		// 对话记录
 		this.transcriptEl = root.createDiv({ cls: "pi-learning-transcript" });
-		this.transcript = new Transcript(this.app, this, this.transcriptEl);
+		// "learning" 状态形如「角色名 · 单元 · 模式」，卡片标题只取角色名
+		this.transcript = new Transcript(this.app, this, this.transcriptEl, () => this.controller.statuses.get("learning")?.split(" · ")[0]);
 
 		// 输入
 		const inputWrap = root.createDiv({ cls: "pi-learning-input-wrap" });

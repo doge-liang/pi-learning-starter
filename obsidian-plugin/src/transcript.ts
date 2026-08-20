@@ -33,7 +33,7 @@ export type AssistantPart = TextPart | ThinkingPart | ToolPart;
 export type Block =
 	| { kind: "user"; text: string; el?: HTMLElement }
 	| { kind: "command"; text: string; el?: HTMLElement }
-	| { kind: "assistant"; parts: AssistantPart[]; streaming: boolean; error?: string; el?: HTMLElement; roleEl?: HTMLElement; bodyEl?: HTMLElement; errorEl?: HTMLElement }
+	| { kind: "assistant"; parts: AssistantPart[]; streaming: boolean; role?: string; error?: string; el?: HTMLElement; roleEl?: HTMLElement; bodyEl?: HTMLElement; errorEl?: HTMLElement }
 	| { kind: "note"; text: string; el?: HTMLElement }
 	| { kind: "custom"; customType: string; text: string; el?: HTMLElement }
 	| { kind: "system"; text: string; level: "info" | "warning" | "error"; el?: HTMLElement };
@@ -48,6 +48,8 @@ export class Transcript {
 		private app: App,
 		private component: Component,
 		private container: HTMLElement,
+		/** 取当前角色名；消息开始时快照到块上（历史消息不记录角色，重载后无从追溯，故只标注新消息） */
+		private roleName?: () => string | undefined,
 	) {}
 
 	clear(): void {
@@ -132,7 +134,7 @@ export class Transcript {
 
 	onMessageStart(m: AgentMessage): void {
 		if (m.role === "assistant") {
-			this.current = { kind: "assistant", parts: [], streaming: true };
+			this.current = { kind: "assistant", parts: [], streaming: true, role: this.roleName?.() };
 			this.push(this.current);
 			this.renderLast();
 		} else if (m.role === "user") {
@@ -211,7 +213,7 @@ export class Transcript {
 		const am = m as AssistantMessage;
 		let cur = this.current;
 		if (!cur) {
-			cur = { kind: "assistant", parts: [], streaming: true };
+			cur = { kind: "assistant", parts: [], streaming: true, role: this.roleName?.() };
 			this.push(cur);
 		}
 		// 以最终消息为准；尽量复用已有部件的 DOM，保留工具结果
@@ -320,7 +322,7 @@ export class Transcript {
 		el.className = `pi-learning-block pi-learning-${b.kind}`;
 		switch (b.kind) {
 			case "user": {
-				el.createDiv({ cls: "pi-learning-role", text: "你" });
+				// 不显示标题，靠右对齐即可辨识用户消息
 				// 扩展加在消息前面的标记（[mode: hint]、[begin-session]、[grade] 等）显示为小标签
 				const { tags, rest } = splitLeadingTags(b.text);
 				if (tags.length) {
@@ -364,8 +366,10 @@ export class Transcript {
 		}
 		b.el.toggleClass("pi-learning-streaming", b.streaming);
 		b.roleEl!.empty();
-		b.roleEl!.createSpan({ text: "角色" });
-		if (b.streaming) b.roleEl!.createSpan({ cls: "pi-learning-dots", text: "生成中" });
+		if (b.role) b.roleEl!.createSpan({ text: b.role });
+		if (b.streaming) b.roleEl!.createSpan({ cls: "pi-learning-dots", text: b.role ? " · 生成中" : "生成中" });
+		// 历史消息不记录角色：既无角色也不在生成时整行隐藏
+		b.roleEl!.toggleClass("pi-learning-hidden", !b.role && !b.streaming);
 
 		const body = b.bodyEl!;
 		let anchor: Node | null = null; // 维持部件顺序：逐个 insertAfter
