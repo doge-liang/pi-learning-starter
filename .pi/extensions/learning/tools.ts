@@ -9,10 +9,13 @@ import { StringEnum } from "@earendil-works/pi-ai";
 import type { ExtensionAPI } from "@earendil-works/pi-coding-agent";
 import { Type } from "typebox";
 import {
+	acceptCurate,
 	acceptPlan,
 	acceptSources,
+	ACCESS_LEVELS,
 	Blackboard,
 	type Concept,
+	type CurateProposal,
 	FAIL,
 	onFail,
 	onPartial,
@@ -292,6 +295,30 @@ ${summary}
 					est_minutes: Type.Integer({ minimum: 1 }),
 					quality_note: Type.String({ description: "为何选它、可靠程度、不确定之处" }),
 					alternative: Type.Optional(Type.Boolean({ description: "是否为替代讲解资料" })),
+					access: Type.Optional(
+						StringEnum(ACCESS_LEVELS, {
+							description: "获取等级：open 开放获取 / campus 需机构或图书馆权限 / paid 需购买 / physical 纸质馆藏 / unavailable 暂无渠道 / unknown 未判定",
+						}),
+					),
+					acquire_note: Type.Optional(Type.String({ description: "怎么拿到：开放获取版本的完整 URL、图书馆检索式、课程页面、购买渠道。不要指向盗版站点。" })),
+					meta: Type.Optional(
+						Type.Object(
+							{
+								authors: Type.Optional(Type.Array(Type.String())),
+								year: Type.Optional(Type.Integer()),
+								publisher: Type.Optional(Type.String()),
+								edition: Type.Optional(Type.String()),
+								container: Type.Optional(Type.String({ description: "期刊名、丛书名或课程名" })),
+								pages: Type.Optional(Type.String()),
+								doi: Type.Optional(Type.String()),
+								isbn: Type.Optional(Type.String()),
+								url: Type.Optional(Type.String({ description: "可直接获取的 URL，优先开放获取版本" })),
+								language: Type.Optional(Type.String()),
+							},
+							{ description: "题录元数据：决定学习者能否一键入 Zotero；不确定的字段留空，不要编造" },
+						),
+					),
+					tags: Type.Optional(Type.Array(Type.String(), { description: "少量可检索的标签" })),
 				}),
 			),
 		}),
@@ -304,7 +331,56 @@ ${summary}
 
 ${summary}
 
-请把上面的摘要转述给学习者：如需调整，学习者直接在本会话说明，你修改后重新调用 bb_sources_propose；满意后学习者运行 /accept，并在亲自打开每份资料后运行 /verify <资料id> 标记已核验。`);
+请把上面的摘要转述给学习者：如需调整，学习者直接在本会话说明，你修改后重新调用 bb_sources_propose；满意后学习者运行 /accept，再用 /collect <资料id> 获取与入库，并在亲自打开每份资料后运行 /verify <资料id> 标记已核验。`);
+		},
+	});
+
+	pi.registerTool({
+		name: "bb_sources_curate",
+		label: "提交资料整理提案",
+		description: "资料管理员提交馆藏整理提案：合并重复、下线失效、排定单元内阅读顺序、打标签、记录覆盖缺口。写入 blackboard/proposals/，学习者用 /accept 接受后改写 sources.json 与 path.json 的索引；不会删除任何本地文件。",
+		parameters: Type.Object({
+			retire: Type.Optional(
+				Type.Array(Type.Object({ id: Type.String(), reason: Type.String({ description: "为何下线：链接失效、被更好的资料取代、与单元不再相关" }) }), { description: "下线的资料" }),
+			),
+			merge: Type.Optional(
+				Type.Array(
+					Type.Object({
+						keep: Type.String({ description: "保留的资料 id（定位最精确的那条）" }),
+						drop: Type.Array(Type.String(), { description: "并入并随之下线的资料 id" }),
+						reason: Type.String(),
+					}),
+					{ description: "同一份资料的不同版本或入口的合并" },
+				),
+			),
+			reorder: Type.Optional(
+				Type.Array(Type.Object({ unit: Type.String(), order: Type.Array(Type.String(), { description: "该单元资料的阅读顺序：主资料在前，替代讲解在后，参考手册最后" }) })),
+			),
+			tag: Type.Optional(Type.Array(Type.Object({ id: Type.String(), tags: Type.Array(Type.String()) }), { description: "少量可检索的标签，不要堆砌" })),
+			gaps: Type.Optional(
+				Type.Array(
+					Type.Object({
+						scope: StringEnum(["unit", "concept"] as const),
+						id: Type.String(),
+						note: Type.String({ description: "缺什么" }),
+						suggestion: Type.Optional(Type.String({ description: "补料方向" })),
+					}),
+					{ description: "对照黑板上下文的「馆藏缺口」列出仍未覆盖的单元或概念" },
+				),
+			),
+			notes: Type.Optional(Type.String({ description: "整理的总体依据" })),
+		}),
+		executionMode: "sequential",
+		async execute(_id, params) {
+			requireRole(deps.state(), "librarian");
+			const proposal = { kind: "curate" as const, ...params };
+			const path = bb.writeProposal("curate", proposal);
+			const summary = bb.summarizeProposal(proposal);
+			return text(`整理提案已写入 ${path}。
+
+${summary}
+
+请把上面的摘要转述给学习者：如需调整，学习者直接在本会话说明，你修改后重新调用 bb_sources_curate；满意后学习者运行 /accept。整理只改索引，不会删除本地副本。`);
 		},
 	});
 
@@ -663,14 +739,17 @@ export function applyProposal(bb: Blackboard, file: string): string {
 		throw new Error(`无法读取提案文件 ${file}：${(e as Error).message}`);
 	}
 	let summary: string;
-	if (Array.isArray((data as { sources?: unknown }).sources)) {
+	if (data.kind === "curate") {
+		const r = acceptCurate(bb, data as unknown as CurateProposal);
+		summary = `馆藏索引已更新：下线 ${r.retired}，合并 ${r.merged}，重排 ${r.reordered} 个单元，打标签 ${r.tagged}，记录缺口 ${r.gaps}。本地副本未被改动；/library 查看馆藏。`;
+	} else if (Array.isArray((data as { sources?: unknown }).sources)) {
 		const n = acceptSources(bb, data as { sources: Source[] });
-		summary = `已写入 sources.json（共 ${n} 份）并挂到单元上。请亲自打开每份资料，确认后运行 /verify <资料id>。`;
+		summary = `已写入 sources.json（共 ${n} 份）并挂到单元上。接下来 /collect <资料id> 获取与入库；亲自打开后运行 /verify <资料id>。`;
 	} else if (Array.isArray((data as { units?: unknown }).units)) {
 		const r = acceptPlan(bb, data as { concepts?: Concept[]; units?: Unit[]; notes?: string });
 		summary = `已写入 concepts.json（${r.concepts} 个概念）与 path.json（${r.units} 个单元），并发出 structure_ready 事件。`;
 	} else {
-		throw new Error("提案文件既不是规划提案也不是资料提案。");
+		throw new Error("提案文件既不是规划提案，也不是资料提案或整理提案。");
 	}
 	const accepted = bb.markProposalAccepted(file);
 	return `${summary}\n提案已标记为已接受：${accepted}`;

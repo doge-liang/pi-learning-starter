@@ -24,8 +24,16 @@ export const COMMAND_GROUPS: CommandGroup[] = [
 			{ name: "critique", label: "评审提案", hint: "独立的提案评审员审查最近一份提案" },
 			{ name: "exemplar", label: "提供范例", hint: "粘贴课程大纲或良好实践供规划者参考", arg: { prompt: "范例名字", placeholder: "cs336-syllabus" } },
 			{ name: "accept", label: "接受提案", hint: "接受最近一份尚未接受的规划 / 资料提案" },
-			{ name: "sources", label: "选材", hint: "资料管理员为单元匹配资料", arg: { prompt: "参数（留空为所有无资料单元；或「单元id 障碍说明」请求替代资料）", placeholder: "u01 看不懂第二节", optional: true } },
+		],
+	},
+	{
+		title: "资料",
+		commands: [
+			{ name: "sources", label: "选材", hint: "资料管理员为单元匹配资料，给出获取等级与获取途径", arg: { prompt: "参数（留空为所有无资料单元；或「单元id 障碍说明」请求替代资料）", placeholder: "u01 看不懂第二节", optional: true } },
+			{ name: "collect", label: "获取入库", hint: "下载或登记本地副本，可选送进 Zotero 与网盘", arg: { prompt: "资料 id（留空则从未获取列表选择）", optional: true } },
 			{ name: "verify", label: "核验资料", hint: "亲自打开资料后标记已核验", arg: { prompt: "资料 id（留空则从未核验列表选择）", optional: true } },
+			{ name: "library", label: "馆藏概览", hint: "按单元列出资料、获取与核验状态、覆盖缺口", arg: { prompt: "单元 id（留空为全部）", placeholder: "u01", optional: true } },
+			{ name: "curate", label: "整理馆藏", hint: "馆员合并重复、下线失效、排定阅读顺序、列出缺口", arg: { prompt: "单元 id（留空为全部）", placeholder: "u01", optional: true } },
 		],
 	},
 	{

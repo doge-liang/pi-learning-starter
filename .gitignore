@@ -22,3 +22,7 @@ blackboard/exemplars/*
 !blackboard/exemplars/.gitkeep
 blackboard/placement/*
 !blackboard/placement/.gitkeep
+
+# 本地资料副本与 Zotero 导入文件：体量大且多为受版权保护的原件，绝不进版本库
+blackboard/library/*
+!blackboard/library/.gitkeep

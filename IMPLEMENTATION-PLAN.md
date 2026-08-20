@@ -33,9 +33,10 @@ my-learning/
     learning.json                     角色 → 模型
     extensions/learning/
       index.ts  state.ts  roles.ts  tools.ts  blackboard.ts  commands.ts
+      config.ts  library.ts  zotero.ts  remote.ts
   blackboard/
     domain.json concepts.json path.json sources.json glossary.md errors.jsonl events.jsonl
-    evidence/  artifacts/{reviews/}  assessments/  reflections/  proposals/
+    evidence/  artifacts/{reviews/}  assessments/  reflections/  proposals/  library/
   scripts/
     assess-cron.sh  assess-cron.mjs  due-check.mjs
   tests/                              伪造 ExtensionAPI 的全流程测试、加载测试、脚本测试
@@ -56,7 +57,7 @@ my-learning/
 
 ### 4.2 系统提示与黑板上下文（before_agent_start）
 
-每一轮开始前，扩展把角色提示追加到 pi 的系统提示之后（保留 pi 对工具的说明），并从黑板装配一段角色所需的结构化上下文：陪读老师得到当前单元、资料、相关概念与掌握度、学习者已写的术语表、未解决错误、本会话预问题；复盘老师得到到期概念、全部概念、近期错误、会话证据摘要、术语表、待批改的测试；规划者得到现有结构、错误与测评结果；馆员得到单元与已有资料；评审员得到产出物路径与相关概念。上下文作为一条 `customType: "learning-context"` 的消息注入，只在其哈希变化时重新注入，避免每轮重复占用上下文并保留提示缓存。
+每一轮开始前，扩展把角色提示追加到 pi 的系统提示之后（保留 pi 对工具的说明），并从黑板装配一段角色所需的结构化上下文：陪读老师得到当前单元、资料、相关概念与掌握度、学习者已写的术语表、未解决错误、本会话预问题；复盘老师得到到期概念、全部概念、近期错误、会话证据摘要、术语表、待批改的测试；规划者得到现有结构、错误与测评结果；馆员得到单元、含获取状态的馆藏与覆盖缺口；评审员得到产出物路径与相关概念。上下文作为一条 `customType: "learning-context"` 的消息注入，只在其哈希变化时重新注入，避免每轮重复占用上下文并保留提示缓存。
 
 ### 4.3 护栏（tool_call、input）
 
@@ -72,7 +73,8 @@ my-learning/
 | `bb_placement_grade` | 水平测试官 | `placement/*-result.json`、`domain.json.placement` | 按领域聚合得分（代码）、层级判断与建议（模型）；算校准偏差；不动掌握度 |
 | `bb_plan_propose` | 领域专家 | `proposals/plan-*.json` | 校验前置引用与成环；提案须经 `/accept` 才生效 |
 | `bb_proposal_review` | 提案评审员 | `proposals/*.review.json` / `.md` | 独立审查提案：逐条发现（blocking / major / minor）与结论；blocking 存在时结论必须为 revise；不改提案 |
-| `bb_sources_propose` | 资料管理员 | `proposals/sources-*.json` | 经 `/accept` 合并；`verified` 一律 false |
+| `bb_sources_propose` | 资料管理员 | `proposals/sources-*.json` | 除定位外还提交获取等级、获取途径与题录元数据；经 `/accept` 合并；`verified` 一律 false，`acquisition` 台账不被提案覆盖；合并后仍有缺口则发 `sources_gap` |
+| `bb_sources_curate` | 资料管理员 | `proposals/curate-*.json` | 整理提案：合并、下线、单元内排序、标签、缺口；经 `/accept` 只改索引，不动本地副本 |
 | `bb_check_link` | 资料管理员 | 无 | HEAD/GET 可达性检查 |
 | `bb_prequestions` | 陪读老师 | 会话状态 | 供 `/answer` 使用 |
 | `bb_evidence` | 陪读老师 | `evidence/*.json`、`concepts.json`、`errors.jsonl`、`events.jsonl` | 掌握度上限 learned；附上学习者的作答与信心；退出标准满足时经 `ctx.ui.confirm` 才标记单元完成并发 `unit_complete`；资料请求发 `resource_request`；错误达阈值发 `errors_threshold` |
@@ -84,11 +86,11 @@ my-learning/
 
 ### 4.5 命令（commands.ts）
 
-`/learn` 概览；`/placement [n]`（水平测试官会话：先画像对话——`bb_domain_set` 经确认写入 `domain.json`——再出诊断题；`/take` 识别 `placement/` 下的待作答测试并以 `[grade-placement]` 交回水平测试官）；`/plan [replan|revise]`（revise：规划者上下文含待修改的提案与评审意见）；`/critique [file]`（提案评审员会话独立审查最近一份未接受的提案）；`/exemplar <名字>`（编辑器写入 `exemplars/`，作为规划者与评审员的范例输入；扩展另自带一份规划范例与反例，首次规划与修改时注入）；`/accept [file]`（确认框显示提案摘要；接受后改名 `*.accepted.json`）；`/sources [unit] [障碍说明]`；`/verify [id]`（学习者亲自核验资料后置位 `verified`，无参数时从未核验列表选择）；`/read [unit]`；`/hint` `/explain`；`/answer`（逐题弹出多行编辑器与 1 到 5 的信心选择，然后以 `[closed-book answers]` 发给陪读老师）；`/gloss <id>`（编辑器写条目，扩展追加到 `glossary.md`，再以 `[glossary check]` 请老师核对）；`/done`（以 `[end-session]` 请老师调用 `bb_evidence`）；`/artifact <名字>`（编辑器写产出物到 `artifacts/`）；`/review <文件> [unit]`；`/assess [n]`；`/take [file]`（逐题作答与信心，然后以 `[grade]` 交给复盘老师，必要时先切到考评官会话）；`/reflect [file]`（编辑器预填复盘提纲，就地写「我的复盘」）；`/events` `/dispatch`；`/role <name|none>`。命令带参数补全（单元 id、概念 id、资料 id、角色名）。学习者的界面始终是对话与对话框，不要求手改黑板文件；提案工具的返回里带可读摘要，学习者在会话里要求修改即可。
+`/learn` 概览；`/placement [n]`（水平测试官会话：先画像对话——`bb_domain_set` 经确认写入 `domain.json`——再出诊断题；`/take` 识别 `placement/` 下的待作答测试并以 `[grade-placement]` 交回水平测试官）；`/plan [replan|revise]`（revise：规划者上下文含待修改的提案与评审意见）；`/critique [file]`（提案评审员会话独立审查最近一份未接受的提案）；`/exemplar <名字>`（编辑器写入 `exemplars/`，作为规划者与评审员的范例输入；扩展另自带一份规划范例与反例，首次规划与修改时注入）；`/accept [file]`（确认框显示提案摘要；接受后改名 `*.accepted.json`）；`/sources [unit] [障碍说明]`；`/collect [id]`（获取与入库：开放获取直链经确认下载到 `library/`，否则登记学习者自备的路径或记为 `unavailable`；随后可选把题录送进 Zotero、把副本送进网盘。下载与入库都是命令行为，模型没有这条路径）；`/verify [id]`（学习者亲自核验资料后置位 `verified`，无参数时从未核验列表选择）；`/library [unit]`（馆藏概览与覆盖缺口）；`/curate [unit]`（馆员整理馆藏）；`/read [unit]`；`/hint` `/explain`；`/answer`（逐题弹出多行编辑器与 1 到 5 的信心选择，然后以 `[closed-book answers]` 发给陪读老师）；`/gloss <id>`（编辑器写条目，扩展追加到 `glossary.md`，再以 `[glossary check]` 请老师核对）；`/done`（以 `[end-session]` 请老师调用 `bb_evidence`）；`/artifact <名字>`（编辑器写产出物到 `artifacts/`）；`/review <文件> [unit]`；`/assess [n]`；`/take [file]`（逐题作答与信心，然后以 `[grade]` 交给复盘老师，必要时先切到考评官会话）；`/reflect [file]`（编辑器预填复盘提纲，就地写「我的复盘」）；`/events` `/dispatch`；`/role <name|none>`。命令带参数补全（单元 id、概念 id、资料 id、角色名）。学习者的界面始终是对话与对话框，不要求手改黑板文件；提案工具的返回里带可读摘要，学习者在会话里要求修改即可。
 
 ### 4.6 五个流程在 pi 中的时序
 
-A 启动与规划：`/placement` → 水平测试官先做画像对话（`bb_domain_set` 确认后写 `domain.json`），再出诊断题 → `/take` 闭卷作答 → `bb_placement_grade`（按领域聚合，结论写入 `domain.json.placement`）→ `/plan` → 规划者会话（上下文含 domain、水平测试结果、范例）→ `bb_plan_propose`（返回摘要）→ `/critique` → 评审员会话 → `bb_proposal_review`（发现与结论）→ 如需修改 `/plan revise` → 规划者按意见重新提交 → `/accept` → 写入并发 `structure_ready` → `/sources` 或 `/dispatch` → 馆员会话 → `bb_sources_propose` → `/accept` → 学习者亲自核验资料后 `/verify`。
+A 启动与规划：`/placement` → 水平测试官先做画像对话（`bb_domain_set` 确认后写 `domain.json`），再出诊断题 → `/take` 闭卷作答 → `bb_placement_grade`（按领域聚合，结论写入 `domain.json.placement`）→ `/plan` → 规划者会话（上下文含 domain、水平测试结果、范例）→ `bb_plan_propose`（返回摘要）→ `/critique` → 评审员会话 → `bb_proposal_review`（发现与结论）→ 如需修改 `/plan revise` → 规划者按意见重新提交 → `/accept` → 写入并发 `structure_ready` → `/sources` 或 `/dispatch` → 馆员会话 → `bb_sources_propose` → `/accept` → `/collect` 获取与入库 → 学习者亲自核验资料后 `/verify`；`/library` 看缺口，`/curate` → `bb_sources_curate` → `/accept` 整理索引。
 
 B 阅读会话：`/read u01` → 陪读会话，开场语 `[begin-session]` → `bb_prequestions` → 学习者读资料并提问（消息自动带 `[mode: hint]`）→ `/answer` → 老师批改 → `/gloss` → 老师核对 → `/done` → `bb_evidence`（上限 learned；确认后单元完成并发事件）。
 
@@ -96,7 +98,7 @@ C 产出与评审：学习者独立完成产出物（`/artifact` 或直接放入
 
 D 定期复盘：cron 运行 `scripts/assess-cron.sh`（`due-check.mjs` 判断是否该出题；是则 `LEARN_ROLE=assessor pi -p -a` 让考评官调用 `bb_test_create`）→ 学习者进入 pi，`/learn` 提示待作答 → `/take` 闭卷作答并给信心 → 切到考评官会话，`[grade]` 消息 → `bb_grade` 更新掌握度、校准、提纲、事件 → 学习者 `/reflect` 亲笔写复盘。
 
-E 调整路径：`replan_request` 事件 → `/dispatch` 或 `/plan replan` → 规划者会话（上下文含测评结果与错误）→ 增量提案 → `/accept` → `structure_ready` → 馆员补资料。
+E 调整路径：`replan_request` 事件 → `/dispatch` 或 `/plan replan` → 规划者会话（上下文含测评结果与错误）→ 增量提案 → `/accept` → `structure_ready` → 馆员补资料；补料或整理后若仍有单元、概念没有在架资料，发 `sources_gap`，`/dispatch` 再交回馆员（整段单元缺料走补料，只是概念未覆盖走整理）。
 
 ## 5. 安装与首次运行
 

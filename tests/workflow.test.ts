@@ -6,6 +6,8 @@
  */
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
+import { createServer } from "node:http";
+import type { AddressInfo } from "node:net";
 import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
@@ -26,6 +28,14 @@ function readJsonl<T = any>(p: string): T[] {
 		.filter(Boolean)
 		.map((l) => JSON.parse(l) as T);
 }
+/** sources.json 的 id → 条目索引，测试里反复要用 */
+function sourceIndex(bbDir: string): Record<string, any> {
+	return Object.fromEntries(readJson(join(bbDir, "sources.json")).sources.map((s: any) => [s.id, s]));
+}
+/** 最近一条 learning-note 的文本（/learn、/library、/events 等命令的输出） */
+function lastNote(pi: FakePi): string {
+	return (pi.entries.filter((e) => e.customType === "learning-note").at(-1)?.data as { text: string } | undefined)?.text ?? "";
+}
 function daysFromToday(iso: string): number {
 	return Math.round((Date.parse(iso) - Date.parse(new Date().toISOString().slice(0, 10))) / 86400000);
 }
@@ -38,7 +48,7 @@ describe("学习工作流（全流程）", () => {
 	const project = makeProject(repoRoot);
 	const bbDir = join(project.cwd, "blackboard");
 	const pi = new FakePi();
-	const uiScript: Required<UiScript> = { editor: [], select: [], confirm: [] };
+	const uiScript: Required<UiScript> = { editor: [], select: [], confirm: [], input: [] };
 	const ctx = makeCtx(pi, { cwd: project.cwd, ui: uiScript, models: { "anthropic/claude-opus-5": { provider: "anthropic", id: "claude-opus-5" } } });
 
 	before(async () => {
@@ -51,10 +61,10 @@ describe("学习工作流（全流程）", () => {
 	});
 	after(() => project.cleanup());
 
-	it("注册了 13 个 bb_* 工具、22 个命令与 4 个事件处理器", () => {
+	it("注册了 14 个 bb_* 工具、25 个命令与 4 个事件处理器", () => {
 		const bbTools = [...pi.tools.keys()].filter((n) => n.startsWith("bb_"));
-		assert.equal(bbTools.length, 13, bbTools.join(","));
-		assert.equal(pi.commands.size, 22, [...pi.commands.keys()].join(","));
+		assert.equal(bbTools.length, 14, bbTools.join(","));
+		assert.equal(pi.commands.size, 25, [...pi.commands.keys()].join(","));
 		assert.deepEqual([...pi.handlers.keys()].sort(), ["before_agent_start", "input", "session_start", "tool_call"]);
 	});
 
@@ -695,6 +705,180 @@ describe("学习工作流（全流程）", () => {
 			assert.deepEqual(cs.map((c) => c.value), ["backward"]);
 			const rs = pi.command("role").getArgumentCompletions?.("n") ?? [];
 			assert.deepEqual(rs.map((c) => c.value), ["none"]);
+		});
+	});
+
+	// ------------------------------------------------------------ 流程 F：馆藏的收集与整理
+	// 放在流程 E 之后：此时黑板上正好有一个刚插入、尚无资料的补救单元 u01b，
+	// 覆盖缺口、补料、收集与整理可以在同一份数据上依次验证。
+	describe("流程 F：馆藏的收集与整理", () => {
+		it("/sources 请求替代资料：提案带获取等级、获取途径与题录元数据；/accept 后仍有缺口则发 sources_gap", async () => {
+			pi.sentMessages.length = 0;
+			await pi.command("sources").handler("u02 现有讲义推导跳步，需要更系统的教材", ctx);
+			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.librarian.tools]);
+			assert.match(pi.lastMessage(), /理解困难/);
+
+			await pi.tool("bb_sources_propose").execute("t", {
+				sources: [
+					{
+						id: "prml",
+						title: "Pattern Recognition and Machine Learning",
+						type: "textbook",
+						locator: "Bishop, 2006, ch. 5.3",
+						covers: ["backward"],
+						for_units: ["u02"],
+						est_minutes: 120,
+						quality_note: "反向传播的标准推导",
+						alternative: true,
+						access: "paid",
+						acquire_note: "Springer 正版；图书馆索书号 QA76.87 B54",
+						meta: { authors: ["Christopher M. Bishop"], year: 2006, publisher: "Springer", isbn: "978-0387310732" },
+						tags: ["教材"],
+					},
+					{
+						id: "prml-free",
+						title: "Pattern Recognition and Machine Learning（官方免费版）",
+						type: "textbook",
+						locator: "Bishop, 2006, ch. 5.3",
+						covers: ["backward"],
+						for_units: ["u02"],
+						est_minutes: 120,
+						quality_note: "同一本书由出版方公开的免费版",
+						alternative: true,
+						access: "open",
+						acquire_note: "出版方公开的免费 PDF",
+						meta: { authors: ["Christopher M. Bishop"], year: 2006, publisher: "Springer" },
+					},
+				],
+			});
+			uiScript.confirm.push(true);
+			await pi.command("accept").handler("", ctx);
+			const byId = sourceIndex(bbDir);
+			assert.equal(byId.prml.access, "paid");
+			assert.match(byId.prml.acquire_note, /索书号/);
+			assert.deepEqual(byId.prml.meta.authors, ["Christopher M. Bishop"]);
+			assert.equal(byId.prml.verified, false);
+			const note = lastNote(pi);
+			assert.match(note, /\/collect/);
+			// u01b 仍无资料、graph-edges 仍无资料覆盖 → 缺口事件
+			const gap = readJsonl(join(bbDir, "events.jsonl")).filter((e) => e.type === "sources_gap").at(-1);
+			assert.deepEqual(gap.payload.units, ["u01b"]);
+			assert.deepEqual(gap.payload.concepts, ["graph-edges"]);
+			assert.equal(gap.handled, false);
+		});
+
+		it("/collect 下载直链、写出 Zotero 题录并登记收集台账", async () => {
+			// 本地 HTTP 服务代替外网：验证下载、后缀推断与台账登记，不引入网络依赖
+			const server = createServer((_req, res) => {
+				res.writeHead(200, { "Content-Type": "application/pdf" });
+				res.end("%PDF-1.4 fake");
+			});
+			await new Promise<void>((done) => server.listen(0, "127.0.0.1", () => done()));
+			const port = (server.address() as AddressInfo).port;
+			try {
+				// 模拟馆员在提案里填好的开放获取直链
+				const data = readJson(join(bbDir, "sources.json"));
+				const s = data.sources.find((x: any) => x.id === "cs231n-bp");
+				s.access = "open";
+				s.meta = { authors: ["Andrej Karpathy"], year: 2016, url: `http://127.0.0.1:${port}/optimization-2.pdf` };
+				writeFileSync(join(bbDir, "sources.json"), JSON.stringify(data, null, 2), "utf8");
+
+				ctx.confirms.length = 0;
+				uiScript.confirm.push(true); // 下载
+				uiScript.confirm.push(true); // 入 Zotero
+				await pi.command("collect").handler("cs231n-bp", ctx);
+				assert.match(ctx.confirms[0][1], /合法的公开获取渠道/);
+
+				const cs = sourceIndex(bbDir)["cs231n-bp"];
+				assert.equal(cs.acquisition.status, "obtained");
+				assert.equal(cs.acquisition.local_path, "blackboard/library/cs231n-bp.pdf");
+				assert.equal(readFileSync(join(project.cwd, cs.acquisition.local_path), "utf8"), "%PDF-1.4 fake");
+				assert.equal(cs.verified, false, "下载不等于核验");
+				assert.equal(cs.acquisition.zotero.mode, "file");
+				const csl = readJson(join(project.cwd, cs.acquisition.zotero.file));
+				assert.equal(csl[0].type, "document", "course → CSL document");
+				assert.deepEqual(csl[0].author, [{ literal: "Andrej Karpathy" }]);
+				assert.match(csl[0].note, /pi-learning-source: cs231n-bp/);
+			} finally {
+				server.close();
+			}
+		});
+
+		it("/collect 登记学习者自备的本地副本；拿不到时记 unavailable 并提示换料", async () => {
+			const manual = join(bbDir, "library", "dl-goodfellow.pdf");
+			writeFileSync(manual, "local copy", "utf8");
+			uiScript.input.push(manual);
+			uiScript.confirm.push(false); // 不入 Zotero
+			await pi.command("collect").handler("dl-ch6", ctx);
+			const dl = sourceIndex(bbDir)["dl-ch6"];
+			assert.equal(dl.acquisition.local_path, "blackboard/library/dl-goodfellow.pdf", "项目内的路径存成相对路径");
+			assert.equal(dl.acquisition.zotero, undefined);
+			assert.equal(dl.verified, true, "此前的核验状态不受影响");
+
+			// 付费教材拿不到：不填路径，登记为 unavailable
+			ctx.notices.length = 0;
+			uiScript.input.push("");
+			uiScript.select.push("unavailable  暂无渠道");
+			await pi.command("collect").handler("prml", ctx);
+			assert.equal(sourceIndex(bbDir).prml.acquisition.status, "unavailable");
+			assert.ok(ctx.notices.some(([, m]) => m.includes("换一份更易得的资料")));
+			assert.deepEqual(pi.command("collect").getArgumentCompletions?.("prml")?.map((x) => x.value), ["prml", "prml-free"]);
+		});
+
+		it("/library 按单元列出获取与核验状态并汇总缺口", async () => {
+			await pi.command("library").handler("", ctx);
+			const text = lastNote(pi);
+			assert.match(text, /在架 4 份，已获取 2，已核验 1/);
+			assert.ok(text.includes("本地 blackboard/library/cs231n-bp.pdf"));
+			assert.ok(text.includes("（无资料）"), "u01b 没有资料");
+			assert.ok(text.includes("单元无资料：u01b"));
+			assert.ok(text.includes("概念无资料：graph-edges"));
+			assert.ok(text.includes("已获取但未核验：cs231n-bp"));
+		});
+
+		it("/curate 提交整理提案；/accept 后合并、下线、排序与标签落到索引，本地副本不动", async () => {
+			pi.sentMessages.length = 0;
+			await pi.command("curate").handler("", ctx);
+			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.librarian.tools]);
+			assert.match(pi.lastMessage(), /请整理馆藏/);
+
+			await pi.tool("bb_sources_curate").execute("t", {
+				merge: [{ keep: "prml-free", drop: ["prml"], reason: "同一本书，保留可直接获取的免费版" }],
+				reorder: [{ unit: "u02", order: ["cs231n-bp", "prml-free"] }],
+				tag: [{ id: "cs231n-bp", tags: ["讲义", "反向传播"] }],
+				gaps: [{ scope: "unit", id: "u01b", note: "补救单元尚无资料", suggestion: "找一份专讲计算图边与节点区别的讲义" }],
+				notes: "合并重复入口，按主次排序",
+			});
+			ctx.confirms.length = 0;
+			uiScript.confirm.push(true);
+			await pi.command("accept").handler("", ctx);
+			assert.match(ctx.confirms[0][1], /合并 prml（Pattern Recognition and Machine Learning） → prml-free/);
+
+			const byId = sourceIndex(bbDir);
+			assert.equal(byId.prml.retired, true);
+			assert.match(byId.prml.retired_reason, /^合并到 prml-free/);
+			assert.equal(byId["prml-free"].retired, undefined);
+			assert.deepEqual(byId["cs231n-bp"].tags, ["讲义", "反向传播"]);
+			assert.equal(byId["cs231n-bp"].order, 1);
+			assert.equal(byId["prml-free"].order, 2);
+			assert.equal(byId.prml.acquisition.status, "unavailable", "下线不抹掉台账");
+			const u02 = readJson(join(bbDir, "path.json")).units.find((u: any) => u.id === "u02");
+			assert.deepEqual(u02.sources, ["cs231n-bp", "prml-free"], "被合并的 id 由保留的那条顶替并去重");
+			assert.ok(existsSync(join(bbDir, "library", "cs231n-bp.pdf")), "整理只改索引，不动本地副本");
+
+			const gap = readJsonl(join(bbDir, "events.jsonl")).filter((e) => e.type === "sources_gap").at(-1);
+			assert.equal(gap.payload.from, "curate");
+			assert.deepEqual(gap.payload.units, ["u01b"]);
+		});
+
+		it("/dispatch 把 sources_gap 交回馆员补料", async () => {
+			pi.sentMessages.length = 0;
+			await pi.command("dispatch").handler("", ctx);
+			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.librarian.tools]);
+			assert.match(pi.lastMessage(), /u01b/);
+			const ctxText = (await contextOf(pi, ctx))?.message?.content ?? "";
+			assert.ok(ctxText.includes("馆藏缺口") && ctxText.includes("graph-edges"));
+			assert.ok(ctxText.includes('"acquisition": "unavailable"'), "馆员看得到哪些资料迟迟拿不到");
 		});
 	});
 });

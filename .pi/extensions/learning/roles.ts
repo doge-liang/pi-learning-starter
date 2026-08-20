@@ -7,7 +7,7 @@
 import { existsSync, readFileSync } from "node:fs";
 import { join } from "node:path";
 import { fileURLToPath } from "node:url";
-import type { Blackboard } from "./blackboard.ts";
+import { type Blackboard, type Source, sourceGaps } from "./blackboard.ts";
 import type { LearningState, Role } from "./state.ts";
 
 /** 所有角色共用的只读内置工具 */
@@ -113,18 +113,33 @@ ${COMMON}`,
 	librarian: {
 		name: "librarian",
 		label: "资料管理员（馆员）",
-		tools: ["bb_status", "bb_sources_propose", "bb_check_link"],
+		tools: ["bb_status", "bb_sources_propose", "bb_sources_curate", "bb_check_link"],
 		prompt: `# 角色：资料管理员（馆员，Librarian）
 
-你为学习路径中的每个单元匹配具体、可获取的原始资料。你只负责“读哪一份、在哪里”，不负责决定学什么。
+你为学习路径中的每个单元匹配具体、可获取的原始资料，并维护整个馆藏的索引。你负责“读哪一份、在哪里、怎么拿到、怎么归置”，不负责决定学什么。
 
-## 原则
+## 选材
 1. 只推荐你确知存在的资料，并给出精确定位：教材写书名、版次、章节号；论文写标题、作者、年份及 DOI 或 arXiv 编号；课程写名称与讲次；网页写完整 URL。不确定的定位写 "unknown" 并在 quality_note 中说明；不要编造 URL、章节号或 DOI。
 2. 优先级：领域标准教材与原始论文，高于知名课程讲义与官方文档，高于博客与视频。
 3. 每个单元至少一份主资料，可附一份替代讲解；估计阅读或观看时长（分钟）。
 4. 对 URL 可用 bb_check_link 检查可达性；可达不等于内容正确，verified 只有学习者亲自确认后才为 true。
 5. 若被要求提供替代资料（学习者对现有资料理解困难），提供角度不同、更基础或更具体的资料，将 alternative 标为 true，并说明为何更适合当前障碍。
-6. 完成后调用 bb_sources_propose 提交提案；学习者用 /accept 接受后生效。
+
+## 获取清单（收集的前半程由你完成）
+6. 每份资料都要判定获取等级 access：open（开放获取，有可直接下载的合法链接）、campus（需机构或图书馆权限）、paid（需购买）、physical（纸质馆藏）、unavailable（暂无渠道）、unknown（未判定）。判不准就写 unknown，不要凑一个。
+7. acquire_note 写清楚怎么拿到：开放获取版本的完整 URL（arXiv、作者主页、机构知识库、出版社的开放章节）、DOI、ISBN、图书馆检索式或索书号、课程页面、正规购买渠道。同一份资料若有合法的开放获取版本，优先给出它。任何情况下不要指向盗版站点或规避付费墙的手段。只有 access 判为 open 或 campus 且 meta.url 给了直链时，学习者的 /collect 才会提议直接下载；paid、physical、unavailable 一律走人工获取，这几类的 acquire_note 要写得可照做。
+8. meta 尽量填全（作者、年份、出版者、版次、期刊或课程名、页码、DOI、ISBN、URL、语言）：它既是日后检索的依据，也决定学习者能否一键把题录送进 Zotero。不确定的字段留空，不要编造。
+9. 下载、存盘、入 Zotero、入网盘由学习者运行 /collect 完成，你不接触文件系统；学习者亲自打开后运行 /verify 才算核验。你能看到黑板上下文里的获取状态，据此判断哪些资料迟迟拿不到、需要换一份更易得的。
+
+## 整理（收到整理任务时）
+10. 合并：同一份资料的不同版本或不同入口合并为一条，保留定位最精确的那条，其余并入并随之下线。
+11. 下线：链接失效、被更好的资料取代、与单元不再相关、长期标记为 unavailable 的，列入 retire 并写明理由。下线只改索引，不删除学习者的本地副本。
+12. 缺口：对照黑板上下文的「馆藏缺口」，指出哪些单元、哪些概念还没有在架资料，哪些单元还没有已核验的主资料，并给出补料方向。缺口需要新资料时，改用 bb_sources_propose 提交新的资料提案。
+13. 顺序：为每个单元的资料排定阅读顺序，主资料在前，替代讲解在后，参考手册最后。
+14. 标签：给资料打少量可检索的标签（主题、类型、难度），不要堆砌。
+15. 调用 bb_sources_curate 提交整理提案；学习者用 /accept 接受后生效。
+
+选材与补料的提案用 bb_sources_propose，整理用 bb_sources_curate；两者都由学习者 /accept 后才生效。
 ${COMMON}`,
 	},
 	tutor: {
@@ -244,7 +259,8 @@ ${bb.readProposalText(file)}` : "（未指定；请让学习者用 /critique 指
 		case "librarian": {
 			parts.push("## 单元", j(bb.units()));
 			parts.push("## 概念", j(bb.conceptBrief()));
-			parts.push("## 已有资料（避免重复）", j(bb.sources().slice(0, 40)));
+			parts.push("## 馆藏（含获取状态；避免重复，也据此判断哪些资料迟迟拿不到）", j(bb.sources().slice(0, 60).map(sourceBrief)));
+			parts.push("## 馆藏缺口（无在架资料的单元与概念）", j(sourceGaps(bb)));
 			break;
 		}
 		case "tutor": {
@@ -301,6 +317,24 @@ function builtinExemplar(bb: Blackboard): string {
 	return "（范例文件缺失）";
 }
 
+/** 给馆员看的馆藏条目：省掉全文字段，保留判断是否重复、是否换料所需的信息 */
+function sourceBrief(s: Source) {
+	return {
+		id: s.id,
+		title: s.title,
+		type: s.type,
+		locator: s.locator,
+		for_units: s.for_units,
+		covers: s.covers,
+		access: s.access,
+		alternative: s.alternative,
+		tags: s.tags,
+		verified: s.verified === true,
+		acquisition: s.acquisition?.status ?? "pending",
+		retired: s.retired === true,
+	};
+}
+
 function pushLearnerExemplars(parts: string[], bb: Blackboard): void {
 	const ex = bb.exemplars();
 	if (!ex.length) return;
@@ -331,7 +365,10 @@ function recentEvidence(bb: Blackboard, n = 8): unknown[] {
 // 会话开场语
 // ======================================================================
 
-export function kickoff(role: Role, opts: { replan?: boolean; revise?: boolean; units?: string[]; unit?: string; note?: string; artifact?: string; maxItems?: number; existing?: boolean; proposal?: string } = {}): string {
+export function kickoff(
+	role: Role,
+	opts: { replan?: boolean; revise?: boolean; curate?: boolean; units?: string[]; unit?: string; note?: string; artifact?: string; maxItems?: number; existing?: boolean; proposal?: string } = {},
+): string {
 	switch (role) {
 		case "placement":
 			return opts.existing
@@ -345,9 +382,11 @@ export function kickoff(role: Role, opts: { replan?: boolean; revise?: boolean; 
 		case "critic":
 			return `请独立审查提案 ${opts.proposal ?? ""}：逐项检查后调用 bb_proposal_review 提交发现与结论，再把要点转述给我。`;
 		case "librarian":
+			if (opts.curate)
+				return `请整理馆藏：对照黑板上下文的「馆藏」与「馆藏缺口」，合并重复、下线失效与被取代的资料、为每个单元排定阅读顺序、打少量标签，并逐条列出仍未覆盖的单元与概念及补料方向${opts.unit ? `（重点看单元 ${opts.unit}）` : ""}。然后调用 bb_sources_curate 提交整理提案。`;
 			return opts.note
 				? `学习者对单元 ${opts.unit} 的现有资料理解困难：${opts.note}。请提供角度不同、更基础或更具体的替代资料，然后调用 bb_sources_propose 提交（alternative 标为 true）。`
-				: `请为以下单元匹配原始资料：${(opts.units ?? []).join(", ") || "所有尚无资料的单元"}。然后调用 bb_sources_propose 提交提案。`;
+				: `请为以下单元匹配原始资料：${(opts.units ?? []).join(", ") || "所有尚无资料的单元"}。每份都要判定获取等级并写清获取途径与题录元数据，然后调用 bb_sources_propose 提交提案。`;
 		case "tutor":
 			return `[begin-session] 请给出本单元的预问题并调用 bb_prequestions 登记，然后等待学习者阅读与提问。`;
 		case "reviewer":
