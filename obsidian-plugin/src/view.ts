@@ -1,36 +1,45 @@
 /**
- * view.ts —— 侧边栏视图（hub 花名册）：顶栏（活跃实例的状态与控制）、角色页签、
- * 每实例一份对话记录、寻址输入框（@角色 唤醒与路由，无 @ 发给当前页签的实例）。
+ * view.ts —— 侧边栏视图（hub 花名册）：顶栏（活跃实例的状态与控制）、「群」聚合页签 + 角色页签、
+ * 每实例一份对话记录、寻址输入框（@角色 唤醒与路由，无 @ 发给当前角色页签的实例）。
+ *
+ * 群页签是聚合时间线：学习者与 hub 的寻址条目按落盘顺序渲染，各实例的回复经事件流实时镜像
+ * （回合串行执行，同一时刻至多一个实例在流式，镜像无交错）。落盘与注入见 group.ts 两侧。
  * 所有与 pi 的通信经 InstanceManager / LearningController；视图只负责渲染与收集输入。
  */
 import { ItemView, Notice, type WorkspaceLeaf, setIcon } from "obsidian";
 import { COMMAND_GROUPS } from "./commands.ts";
 import type { ControllerSurface, LearningController } from "./controller.ts";
+import { readGroupTail } from "./group.ts";
 import type { InstanceManager } from "./instances.ts";
-import { ROSTER } from "./roster.ts";
+import { ROSTER, roleSpec } from "./roster.ts";
 import type { AgentMessage, RpcEvent } from "./rpc/types.ts";
 import { Transcript, contentText } from "./transcript.ts";
 
 export const VIEW_TYPE = "pi-learning-view";
+const GROUP_TAB = "group";
 
 interface Tab {
-	role: string;
+	id: string;
 	label: string;
 	btn: HTMLElement;
 	container: HTMLElement;
 	transcript: Transcript;
-	surface: ControllerSurface;
+	surface?: ControllerSurface;
 }
 
 export class LearningView extends ItemView {
 	private statusEl!: HTMLElement;
 	private widgetEl!: HTMLElement;
-	private transcriptsEl!: HTMLElement;
 	private inputEl!: HTMLTextAreaElement;
 	private sendBtn!: HTMLButtonElement;
 	private abortBtn!: HTMLButtonElement;
 	private startBtn!: HTMLButtonElement;
 	private tabs = new Map<string, Tab>();
+	/** 当前显示的页签（可能是群）；manager.activeRole 始终是最近的真实角色 */
+	private activeTabId: string = "concierge";
+	/** 群时间线上当前块的角色标签（消息开始时快照）与正在镜像的实例 */
+	private groupRole: string | undefined;
+	private groupStreamingRole: string | null = null;
 
 	constructor(
 		leaf: WorkspaceLeaf,
@@ -53,8 +62,8 @@ export class LearningView extends ItemView {
 	private active(): LearningController {
 		return this.manager.get(this.manager.activeRole);
 	}
-	private activeTab(): Tab {
-		return this.tabs.get(this.manager.activeRole) as Tab;
+	private groupTranscript(): Transcript {
+		return (this.tabs.get(GROUP_TAB) as Tab).transcript;
 	}
 
 	async onOpen(): Promise<void> {
@@ -72,9 +81,9 @@ export class LearningView extends ItemView {
 		this.iconButton(ctl, "history", "历史会话（当前实例）", () => void this.safely(() => this.active().pickSession()));
 		this.iconButton(ctl, "file-plus", "新会话（当前实例）", () => void this.safely(() => this.active().newSession()));
 		this.abortBtn = this.iconButton(ctl, "square", "中止当前实例的回合", () => void this.safely(() => this.active().abort()));
-		this.iconButton(ctl, "refresh-cw", "重新加载当前实例的记录", () => void this.reloadActive());
+		this.iconButton(ctl, "refresh-cw", "重新加载当前页签的记录", () => void this.reloadActive());
 
-		// 角色页签（花名册）
+		// 页签：群 + 花名册
 		const tabBar = root.createDiv({ cls: "pi-learning-tabs" });
 		this.widgetEl = root.createDiv({ cls: "pi-learning-widgets" });
 
@@ -89,17 +98,36 @@ export class LearningView extends ItemView {
 			}
 		}
 
-		// 每实例一份对话记录（容器互斥显示）
-		this.transcriptsEl = root.createDiv({ cls: "pi-learning-transcripts" });
+		// 对话记录容器（互斥显示）：先群，后各实例
+		const transcripts = root.createDiv({ cls: "pi-learning-transcripts" });
+		const makeTab = (id: string, label: string, title: string): Tab => {
+			const btn = tabBar.createEl("button", { cls: "pi-learning-tab", text: label, attr: { title } });
+			btn.addEventListener("click", () => this.activate(id));
+			const container = transcripts.createDiv({ cls: "pi-learning-transcript" });
+			const tab: Tab = { id, label, btn, container, transcript: undefined as unknown as Transcript };
+			this.tabs.set(id, tab);
+			return tab;
+		};
+
+		const groupTab = makeTab(GROUP_TAB, "群", "聚合时间线：学习者的寻址与各实例的回复");
+		groupTab.transcript = new Transcript(this.app, this, groupTab.container, () => this.groupRole);
+
 		for (const spec of ROSTER) {
-			const btn = tabBar.createEl("button", { cls: "pi-learning-tab", text: spec.label, attr: { title: `@${spec.label}` } });
-			btn.addEventListener("click", () => this.activate(spec.role));
-			const container = this.transcriptsEl.createDiv({ cls: "pi-learning-transcript" });
+			const tab = makeTab(spec.role, spec.label, `@${spec.label}`);
 			const controller = this.manager.get(spec.role);
-			const transcript = new Transcript(this.app, this, container, () => controller.statuses.get("learning")?.split(" · ")[0] ?? spec.label);
-			const surface = this.makeSurface(spec.role, transcript);
-			controller.attach(surface);
-			this.tabs.set(spec.role, { role: spec.role, label: spec.label, btn, container, transcript, surface });
+			tab.transcript = new Transcript(this.app, this, tab.container, () => controller.statuses.get("learning")?.split(" · ")[0] ?? spec.label);
+			tab.surface = this.makeSurface(spec.role, spec.label, tab.transcript);
+			controller.attach(tab.surface);
+		}
+
+		// 群时间线开屏回放（落盘的尾部）
+		for (const e of readGroupTail(this.manager.projectDir(), 50)) {
+			if (e.from === "learner") this.groupTranscript().addUser(`@${(e.to ?? []).map((r) => roleSpec(r)?.label ?? r).join(" @")} ${e.text}`.trim());
+			else if (e.from === "hub") this.groupTranscript().addSystem(`hub → ${(e.to ?? []).map((r) => roleSpec(r)?.label ?? r).join("、")}：${e.text}`);
+			else {
+				this.groupRole = roleSpec(e.from)?.label ?? e.from;
+				this.groupTranscript().onMessageEnd({ role: "assistant", content: [{ type: "text", text: e.text }] } as AgentMessage);
+			}
 		}
 
 		// 输入
@@ -119,50 +147,73 @@ export class LearningView extends ItemView {
 
 		this.manager.onQueueChanged = () => this.renderState();
 		this.manager.onEcho = (role, message) => this.echo(role, message);
+		this.manager.onGroupEntry = (entry) => {
+			const labels = (entry.to ?? []).map((r) => roleSpec(r)?.label ?? r);
+			if (entry.from === "learner") this.groupTranscript().addUser(`@${labels.join(" @")} ${entry.text}`.trim());
+			else if (entry.from === "hub") this.groupTranscript().addSystem(`hub → ${labels.join("、")}：${entry.text}`);
+		};
 		this.manager.onError = (role, err) => {
 			new Notice(`【${this.tabs.get(role)?.label ?? role}】${err.message}`, 8000);
 			this.tabs.get(role)?.transcript.addSystem(err.message, "error");
 		};
 
-		this.activate(this.manager.activeRole);
+		this.activate(this.activeTabId);
 		if (this.autoStart()) void this.safely(() => this.manager.ensureStarted("concierge"));
 	}
 
 	async onClose(): Promise<void> {
-		for (const [role, tab] of this.tabs) this.manager.get(role).detach(tab.surface);
+		for (const [id, tab] of this.tabs) {
+			if (tab.surface) this.manager.get(id).detach(tab.surface);
+		}
 		this.manager.onQueueChanged = null;
 		this.manager.onEcho = null;
+		this.manager.onGroupEntry = null;
 		this.manager.onError = null;
 	}
 
 	// ---------- 动作 ----------
 
-	private activate(role: string): void {
-		this.manager.activeRole = role;
-		for (const [r, tab] of this.tabs) tab.container.toggleClass("pi-learning-hidden", r !== role);
+	private activate(id: string): void {
+		this.activeTabId = id;
+		if (id !== GROUP_TAB) this.manager.activeRole = id;
+		for (const [tid, tab] of this.tabs) tab.container.toggleClass("pi-learning-hidden", tid !== id);
 		this.renderState();
 	}
 
 	private async startActive(restart: boolean): Promise<void> {
 		const c = this.active();
+		const tab = this.tabs.get(this.manager.activeRole) as Tab;
 		if (c.running && !restart) return;
-		this.activeTab().transcript.addSystem(c.running ? "正在重启实例…" : "正在启动实例…");
+		tab.transcript.addSystem(c.running ? "正在重启实例…" : "正在启动实例…");
 		try {
 			await c.start();
-			this.activeTab().transcript.addSystem(`实例已启动（${c.launchSource}）。`);
+			tab.transcript.addSystem(`实例已启动（${c.launchSource}）。`);
 		} catch (e) {
-			this.activeTab().transcript.addSystem(`启动失败：${(e as Error).message}`, "error");
+			tab.transcript.addSystem(`启动失败：${(e as Error).message}`, "error");
 		}
 		this.renderState();
 	}
 
 	private async reloadActive(): Promise<void> {
+		if (this.activeTabId === GROUP_TAB) {
+			const t = this.groupTranscript();
+			t.clear();
+			for (const e of readGroupTail(this.manager.projectDir(), 50)) {
+				if (e.from === "learner") t.addUser(`@${(e.to ?? []).map((r) => roleSpec(r)?.label ?? r).join(" @")} ${e.text}`.trim());
+				else if (e.from === "hub") t.addSystem(`hub → ${(e.to ?? []).map((r) => roleSpec(r)?.label ?? r).join("、")}：${e.text}`);
+				else {
+					this.groupRole = roleSpec(e.from)?.label ?? e.from;
+					t.onMessageEnd({ role: "assistant", content: [{ type: "text", text: e.text }] } as AgentMessage);
+				}
+			}
+			return;
+		}
 		const c = this.active();
 		if (!c.running) return;
 		try {
-			this.activeTab().transcript.loadHistory(await c.loadHistory());
+			(this.tabs.get(this.manager.activeRole) as Tab).transcript.loadHistory(await c.loadHistory());
 		} catch (e) {
-			this.activeTab().transcript.addSystem(`加载历史失败：${(e as Error).message}`, "error");
+			(this.tabs.get(this.manager.activeRole) as Tab).transcript.addSystem(`加载历史失败：${(e as Error).message}`, "error");
 		}
 	}
 
@@ -172,7 +223,9 @@ export class LearningView extends ItemView {
 		this.inputEl.value = "";
 		const { targets, unknown } = this.manager.route(text);
 		if (unknown) new Notice(`未知角色：@${unknown}。可用：${ROSTER.map((r) => r.label).join("、")}`);
-		if (targets.length) this.activate(targets[0]);
+		// 群页签下留在群里看聚合流；角色页签下跳到目标实例
+		if (this.activeTabId !== GROUP_TAB && targets.length) this.activate(targets[0]);
+		else if (this.activeTabId === GROUP_TAB && targets.length) this.manager.activeRole = targets[0];
 	}
 
 	private echo(role: string, message: string): void {
@@ -199,26 +252,44 @@ export class LearningView extends ItemView {
 
 	// ---------- 每实例的事件面 ----------
 
-	private makeSurface(role: string, transcript: Transcript): ControllerSurface {
+	private makeSurface(role: string, label: string, transcript: Transcript): ControllerSurface {
 		const view = this;
+		const group = () => view.groupTranscript();
 		return {
 			onEvent(e: RpcEvent): void {
 				switch (e.type) {
-					case "message_start":
-						transcript.onMessageStart(e.message as AgentMessage);
+					case "message_start": {
+						const m = e.message as AgentMessage;
+						transcript.onMessageStart(m);
+						// 群时间线只镜像助手消息；用户与 hub 条目由 onGroupEntry 渲染
+						if (m.role === "assistant") {
+							view.groupStreamingRole = role;
+							view.groupRole = label;
+							group().onMessageStart(m);
+						}
 						break;
+					}
 					case "message_update":
 						transcript.onDelta(e.assistantMessageEvent);
+						if (view.groupStreamingRole === role) group().onDelta(e.assistantMessageEvent);
 						break;
-					case "message_end":
-						transcript.onMessageEnd(e.message as AgentMessage);
+					case "message_end": {
+						const m = e.message as AgentMessage;
+						transcript.onMessageEnd(m);
+						if (view.groupStreamingRole === role && m.role === "assistant") {
+							view.groupRole = label;
+							group().onMessageEnd(m);
+						}
 						break;
+					}
 					case "tool_execution_start":
 						transcript.onToolStart(e.toolCallId, e.toolName, e.args);
+						if (view.groupStreamingRole === role) group().onToolStart(e.toolCallId, e.toolName, e.args);
 						break;
 					case "tool_execution_end": {
 						const text = contentText((e.result?.content ?? []) as Array<{ type: string; text?: string }>);
 						transcript.onToolEnd(e.toolCallId, text, !!e.isError);
+						if (view.groupStreamingRole === role) group().onToolEnd(e.toolCallId, text, !!e.isError);
 						break;
 					}
 					case "entry_appended": {
@@ -230,6 +301,10 @@ export class LearningView extends ItemView {
 					}
 					case "agent_settled":
 						transcript.finishStreaming();
+						if (view.groupStreamingRole === role) {
+							group().finishStreaming();
+							view.groupStreamingRole = null;
+						}
 						break;
 					case "extension_error":
 						transcript.addSystem(`扩展错误（${e.event ?? "?"}）：${e.error}`, "error");
@@ -263,19 +338,26 @@ export class LearningView extends ItemView {
 
 	private renderState(): void {
 		// 页签：运行状态点 + 生成中标记
-		for (const [role, tab] of this.tabs) {
-			const c = this.manager.get(role);
+		for (const [id, tab] of this.tabs) {
+			if (id === GROUP_TAB) {
+				tab.btn.setText(`群${this.manager.pendingCount ? " …" : ""}`);
+				tab.btn.toggleClass("pi-learning-tab-active", this.activeTabId === GROUP_TAB);
+				continue;
+			}
+			const c = this.manager.get(id);
 			tab.btn.setText(`${c.running ? "●" : "○"} ${tab.label}${c.streaming ? " …" : ""}`);
-			tab.btn.toggleClass("pi-learning-tab-active", role === this.manager.activeRole);
+			tab.btn.toggleClass("pi-learning-tab-active", id === this.activeTabId);
 			tab.btn.toggleClass("pi-learning-tab-running", c.running);
 		}
 
-		// 顶栏：活跃实例
+		// 顶栏：活跃实例（群页签下显示未寻址消息的去向）
 		const c = this.active();
 		const st = c.state;
+		const activeLabel = roleSpec(this.manager.activeRole)?.label ?? this.manager.activeRole;
 		const roleStatus = c.statuses.get("learning");
 		this.statusEl.empty();
-		this.statusEl.createSpan({ text: c.running ? (roleStatus ?? this.activeTab().label) : `${this.activeTab().label} 未启动` });
+		if (this.activeTabId === GROUP_TAB) this.statusEl.createSpan({ text: `群视图 · 未寻址消息发给 ${activeLabel}` });
+		else this.statusEl.createSpan({ text: c.running ? (roleStatus ?? activeLabel) : `${activeLabel} 未启动` });
 		if (st?.model) {
 			this.statusEl.createSpan({ text: " · " });
 			const m = this.statusEl.createSpan({

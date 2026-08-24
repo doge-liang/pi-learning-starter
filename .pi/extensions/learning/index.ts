@@ -20,6 +20,7 @@ import { Text } from "@earendil-works/pi-tui";
 import { Blackboard, shortHash } from "./blackboard.ts";
 import { registerCommands } from "./commands.ts";
 import { readConfig } from "./config.ts";
+import { groupTranscriptSection } from "./group.ts";
 import { buildContext, READ_TOOLS, ROLES } from "./roles.ts";
 import { hubMode } from "./route.ts";
 import { emptyState, type LearningState, persist as persistState, restore, type Role, ROLE_NAMES, takeHandoff } from "./state.ts";
@@ -108,7 +109,8 @@ export default function (pi: ExtensionAPI) {
 
 	pi.on("before_agent_start", async (event) => {
 		if (!state.role) return;
-		const context = buildContext(bb, state);
+		// 群转写（hub P2）：附在黑板上下文之后，同一份哈希去重；评审员与复盘老师被隔离（group.ts）
+		const context = buildContext(bb, state) + groupTranscriptSection(bb.cwd, state.role);
 		const hash = shortHash(context);
 		const result: { systemPrompt: string; message?: { customType: string; content: string; display: boolean } } = {
 			systemPrompt: `${event.systemPrompt}\n\n${ROLES[state.role].prompt}${hubMode() ? HUB_ADDENDUM : ""}`,

@@ -3,11 +3,12 @@
  * 跨角色路由不切会话而提示学习者 @，同角色可原地重进（重设单元等参数）。
  */
 import assert from "node:assert/strict";
-import { writeFileSync } from "node:fs";
+import { mkdirSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import learningExtension from "../.pi/extensions/learning/index.ts";
+import { groupTranscriptSection } from "../.pi/extensions/learning/group.ts";
 import { READ_TOOLS, ROLES } from "../.pi/extensions/learning/roles.ts";
 import { FakePi, makeCtx, makeProject, type UiScript } from "./fake-pi.ts";
 
@@ -79,6 +80,51 @@ describe("常驻实例（hub）模式", () => {
 			await pi.command("go").handler("none", ctx);
 			assert.ok(ctx.notices.some(([, m]) => m.includes("固定")));
 			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.tutor.tools]);
+		} finally {
+			delete process.env.LEARN_HUB;
+			delete process.env.LEARN_ROLE;
+		}
+	});
+
+	it("群转写注入：hub 实例的上下文附群转写尾部；自己的发言与被隔离角色除外；坏行容忍", async () => {
+		process.env.LEARN_HUB = "1";
+		process.env.LEARN_ROLE = "tutor";
+		try {
+			const groupDir = join(project.cwd, ".pi", "group");
+			mkdirSync(groupDir, { recursive: true });
+			writeFileSync(
+				join(groupDir, "hub.jsonl"),
+				[
+					JSON.stringify({ ts: "2026-08-24T10:00:00", from: "learner", to: ["librarian"], text: "换一份资料" }),
+					"not json",
+					JSON.stringify({ ts: "2026-08-24T10:01:00", from: "librarian", text: "已提交替代资料提案。" }),
+					JSON.stringify({ ts: "2026-08-24T10:02:00", from: "tutor", text: "这句是陪读老师自己说的" }),
+					JSON.stringify({ ts: "2026-08-24T10:03:00", from: "hub", to: ["assessor"], text: "到期复习 3 个概念，已派发出题" }),
+				].join("\n") + "\n",
+				"utf8",
+			);
+
+			// 纯函数层面：陪读老师看得到别人的发言，看不到自己的；评审员与复盘老师整段被隔离
+			const tutorSection = groupTranscriptSection(project.cwd, "tutor");
+			assert.ok(tutorSection.includes("学习者 → 资料管理员：换一份资料"));
+			assert.ok(tutorSection.includes("资料管理员：已提交替代资料提案。"));
+			assert.ok(tutorSection.includes("hub → 复盘老师：到期复习"));
+			assert.ok(!tutorSection.includes("自己说的"));
+			assert.equal(groupTranscriptSection(project.cwd, "critic"), "");
+			assert.equal(groupTranscriptSection(project.cwd, "assessor"), "");
+
+			// 接入 before_agent_start：上下文消息带群转写段
+			const pi = new FakePi();
+			const ctx = makeCtx(pi, { cwd: project.cwd });
+			learningExtension(pi.api());
+			await pi.emit("session_start", { reason: "startup" }, ctx);
+			const r = await pi.emit("before_agent_start", { systemPrompt: "BASE", messages: [] }, ctx);
+			assert.ok(r?.message?.content.includes("## 群转写"));
+			assert.ok(r?.message?.content.includes("已提交替代资料提案"));
+
+			// 非 hub（终端）模式没有群转写段
+			delete process.env.LEARN_HUB;
+			assert.equal(groupTranscriptSection(project.cwd, "tutor"), "");
 		} finally {
 			delete process.env.LEARN_HUB;
 			delete process.env.LEARN_ROLE;

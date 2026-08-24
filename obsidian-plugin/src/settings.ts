@@ -22,6 +22,10 @@ export interface PiLearningSettings {
 	resumeLast: boolean;
 	/** 各角色实例上次的会话文件（由 InstanceManager 回写；跨插件重启续接） */
 	roleSessions: Record<string, string>;
+	/** 自主触发：轮询黑板，把准备性工作（选材、出题、重规划提案）派发给实例；产物照旧等学习者裁决 */
+	autoTriggers: boolean;
+	/** 同一触发键的冷却时间（分钟） */
+	triggerCooldownMinutes: number;
 }
 
 export const DEFAULT_SETTINGS: PiLearningSettings = {
@@ -33,6 +37,8 @@ export const DEFAULT_SETTINGS: PiLearningSettings = {
 	autoStart: true,
 	resumeLast: true,
 	roleSessions: {},
+	autoTriggers: false,
+	triggerCooldownMinutes: 360,
 };
 
 export class PiLearningSettingTab extends PluginSettingTab {
@@ -114,6 +120,27 @@ export class PiLearningSettingTab extends PluginSettingTab {
 				s.autoStart = v;
 				save();
 			}),
+		);
+		new Setting(containerEl)
+			.setName("自主触发")
+			.setDesc("轮询黑板，把无人值守的准备性工作派发给实例：单元缺资料时请馆员选材、到期或单元完成时请复盘老师出题、结构性缺口时请规划者重规划。产物（提案、测试）照旧排队等你裁决。默认关闭。")
+			.addToggle((t) =>
+				t.setValue(s.autoTriggers).onChange((v) => {
+					s.autoTriggers = v;
+					save();
+				}),
+			);
+		new Setting(containerEl).setName("触发冷却（分钟）").setDesc("同一类触发两次之间的最短间隔；避免反复打扰。").addText((t) =>
+			t
+				.setPlaceholder("360")
+				.setValue(String(s.triggerCooldownMinutes))
+				.onChange((v) => {
+					const n = Number.parseInt(v, 10);
+					if (Number.isFinite(n) && n > 0) {
+						s.triggerCooldownMinutes = n;
+						save();
+					}
+				}),
 		);
 		containerEl.createEl("p", { cls: "setting-item-description", text: "模型凭据不在本插件保存：在终端运行 pi 并 /login，或把 API key 放到用户级环境变量，pi 子进程会自行读取。" });
 	}

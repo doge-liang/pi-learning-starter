@@ -5,6 +5,7 @@
  */
 import type { App } from "obsidian";
 import { LearningController } from "./controller.ts";
+import { appendGroupEntry, type GroupEntry, truncateText } from "./group.ts";
 import { parseAddress, ROSTER, roleSpec } from "./roster.ts";
 import type { PiLearningSettings } from "./settings.ts";
 
@@ -23,12 +24,18 @@ export class InstanceManager {
 	onError: ((role: string, err: Error) => void) | null = null;
 	/** 消息回显（视图把它接到对应实例的对话记录上）；未接视图时静默 */
 	onEcho: ((role: string, message: string) => void) | null = null;
+	/** 学习者 / hub 的群转写条目（视图的群页签渲染用；各实例的回复由视图经事件流直接镜像） */
+	onGroupEntry: ((entry: Omit<GroupEntry, "ts">) => void) | null = null;
 
 	constructor(
 		private app: App,
 		private settings: () => PiLearningSettings,
 		private persist: () => void,
 	) {}
+
+	projectDir(): string {
+		return this.settings().projectDir?.trim() ?? "";
+	}
 
 	get(role: string): LearningController {
 		let c = this.controllers.get(role);
@@ -78,12 +85,24 @@ export class InstanceManager {
 		const { roles, body, unknown } = parseAddress(text);
 		const targets = roles.length ? roles : [this.activeRole];
 		const message = roles.length ? body : text.trim();
-		for (const role of targets) this.dispatch(role, message);
+		if (message) this.recordGroup({ from: "learner", to: targets, text: message });
+		for (const role of targets) this.enqueueTurn(role, message);
 		return { targets, unknown };
 	}
 
-	/** 定向执行（命令条按钮、路由）：入队到指定实例；空消息视为唤醒（仅启动） */
+	/** 定向执行（命令条按钮）：入队到指定实例；空消息视为唤醒（仅启动） */
 	dispatch(role: string, message: string): void {
+		if (message) this.recordGroup({ from: "learner", to: [role], text: message });
+		this.enqueueTurn(role, message);
+	}
+
+	/** 自主触发（TriggerWatcher）：以 hub 的名义派发准备性工作，产物照旧排队等学习者裁决 */
+	dispatchAuto(role: string, message: string, reason: string): void {
+		this.recordGroup({ from: "hub", to: [role], text: `${reason}（已派发：${message}）` });
+		this.enqueueTurn(role, message);
+	}
+
+	private enqueueTurn(role: string, message: string): void {
 		this.enqueue(role, async () => {
 			await this.ensureStarted(role);
 			if (!message) return;
@@ -91,7 +110,26 @@ export class InstanceManager {
 			const c = this.get(role);
 			await c.send(message);
 			await c.waitIdle();
+			// 回合结束后把回复摘要写进群转写（供扩展注入其他实例的上下文）
+			const reply = await c.lastAssistantText();
+			if (reply) this.appendGroupFile({ from: role, text: truncateText(reply) });
 		});
+	}
+
+	/** 学习者 / hub 条目：落盘 + 通知群视图 */
+	private recordGroup(entry: Omit<GroupEntry, "ts">): void {
+		this.appendGroupFile(entry);
+		this.onGroupEntry?.(entry);
+	}
+
+	private appendGroupFile(entry: Omit<GroupEntry, "ts">): void {
+		const dir = this.settings().projectDir?.trim();
+		if (!dir) return;
+		try {
+			appendGroupEntry(dir, entry);
+		} catch (e) {
+			console.error("[pi-learning] 群转写写入失败：", e);
+		}
 	}
 
 	private enqueue(role: string, run: () => Promise<void>): void {
