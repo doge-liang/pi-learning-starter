@@ -50,7 +50,7 @@ export interface Unit {
 	sources?: string[];
 	status?: "pending" | "active" | "done";
 }
-/** 获取等级：拿到这份资料要付出什么代价，决定 /collect 能否直接下载 */
+/** 获取等级：拿到这份资料要付出什么代价，决定收集流程能否直接下载 */
 export const ACCESS_LEVELS = ["open", "campus", "paid", "physical", "unavailable", "unknown"] as const;
 export type AccessLevel = (typeof ACCESS_LEVELS)[number];
 export const ACCESS_LABEL: Record<AccessLevel, string> = {
@@ -78,7 +78,7 @@ export interface SourceMeta {
 	language?: string;
 }
 
-/** 收集台账：学习者侧的登记，模型没有写入这些字段的路径（只有 /collect 命令有） */
+/** 收集台账：学习者侧的登记；写入只发生在逐步确认的收集流程（actions.ts 的 runCollect）里 */
 export interface Acquisition {
 	status: "pending" | "obtained" | "unavailable";
 	/** 本地副本路径，相对项目根 */
@@ -110,7 +110,7 @@ export interface Source {
 	order?: number;
 	retired?: boolean;
 	retired_reason?: string;
-	/** 以下由学习者用 /collect 登记 */
+	/** 以下由学习者在收集流程中登记 */
 	acquisition?: Acquisition;
 }
 export type ProposalKind = "plan" | "sources" | "curate";
@@ -276,7 +276,7 @@ export class Blackboard {
 	domain(): Domain {
 		return this.readJson<Domain>("domain.json", {});
 	}
-	/** 画像写入（/placement 的画像对话）：按提交内容覆盖，未提交的字段与 preferences 中未提及的键保留 */
+	/** 画像写入（水平测试的画像对话）：按提交内容覆盖，未提交的字段与 preferences 中未提及的键保留 */
 	saveDomain(patch: Domain): Domain {
 		const prev = this.domain();
 		const merged: Domain = { ...prev, ...patch, preferences: { ...(prev.preferences ?? {}), ...(patch.preferences ?? {}) } };
@@ -302,7 +302,7 @@ export class Blackboard {
 	saveSources(sources: Source[]): void {
 		this.writeJson("sources.json", { sources });
 	}
-	/** 学习者亲自核验资料后置位（只有 /verify 命令调用，模型没有这条路径） */
+	/** 学习者亲自核验资料后置位（只有 actions.ts 的 runVerify 调用，确认框是唯一路径） */
 	verifySource(id: string, verified = true): Source | undefined {
 		const sources = this.sources();
 		const s = sources.find((x) => x.id === id);
@@ -312,7 +312,7 @@ export class Blackboard {
 		return s;
 	}
 
-	/** 收集台账登记（只有 /collect 命令调用）：按字段合并，未提交的字段保留 */
+	/** 收集台账登记（只有 actions.ts 的 runCollect 调用）：按字段合并，未提交的字段保留 */
 	recordAcquisition(id: string, patch: Partial<Acquisition>): Source | undefined {
 		const sources = this.sources();
 		const s = sources.find((x) => x.id === id);
@@ -369,7 +369,7 @@ export class Blackboard {
 		return out;
 	}
 
-	/** 学习者放进 blackboard/exemplars/ 的范例与良好实践（/exemplar 写入），供规划者与评审员参考 */
+	/** 学习者放进 blackboard/exemplars/ 的范例与良好实践（bb_learner_edit 写入），供规划者与评审员参考 */
 	exemplars(maxCharsEach = 12000): Array<{ name: string; text: string }> {
 		return this.listFiles("exemplars", "", ".md").map((f) => {
 			const text = this.readText(`exemplars/${f}`);
@@ -454,14 +454,14 @@ export class Blackboard {
 		const pending = this.listFiles("assessments", "pending-", ".json");
 		const pendingPlacement = this.listFiles("placement", "pending-", ".json");
 		return [
-			`领域：${this.domain().domain ?? "（未设置，运行 /placement 开始）"}`,
-			this.domain().domain ? `水平测试：${this.domain().placement ? `${this.domain().placement!.date} 总分 ${this.domain().placement!.overall}` : "未做（运行 /placement）"}` : "",
+			`领域：${this.domain().domain ?? "（未设置）"}`,
+			this.domain().domain ? `水平测试：${this.domain().placement ? `${this.domain().placement!.date} 总分 ${this.domain().placement!.overall}` : "未做"}` : "",
 			`掌握度：${LEVELS.map((lv) => `${lv} ${counts[lv]}`).join("  ")}`,
-			unit ? `当前单元：${unit.id} ${unit.title}（${unit.status ?? "pending"}）` : "当前单元：无（先运行 /plan）",
+			unit ? `当前单元：${unit.id} ${unit.title}（${unit.status ?? "pending"}）` : "当前单元：无",
 			`到期复习概念：${this.dueConcepts().length}　未解决错误：${this.unresolvedErrors().length}`,
 			`未处理事件：${ev.length}${ev.length ? "　→ " + ev.map((e) => e.type).join(", ") : ""}`,
-			pending.length ? `待作答的测试：${pending[pending.length - 1]}（运行 /take）` : "",
-			pendingPlacement.length ? `待作答的水平测试：${pendingPlacement[pendingPlacement.length - 1]}（运行 /take）` : "",
+			pending.length ? `待作答的测试：${pending[pending.length - 1]}` : "",
+			pendingPlacement.length ? `待作答的水平测试：${pendingPlacement[pendingPlacement.length - 1]}` : "",
 		]
 			.filter(Boolean)
 			.join("\n");
@@ -487,7 +487,7 @@ export class Blackboard {
 		return this.path("proposals", ranked[ranked.length - 1].f);
 	}
 
-	/** 提案的可读摘要：供工具返回值与 /accept 的确认框使用，让学习者不必打开 JSON 文件审阅 */
+	/** 提案的可读摘要：供工具返回值与接受确认框使用，让学习者不必打开 JSON 文件审阅 */
 	summarizeProposal(data: { kind?: string; concepts?: Concept[]; units?: Unit[]; notes?: string; sources?: Source[] } & Partial<CurateProposal>): string {
 		if (data.kind === "curate") {
 			const names = new Map(this.sources().map((s) => [s.id, s.title]));
@@ -552,7 +552,7 @@ export class Blackboard {
 		return { json, md };
 	}
 
-	/** 接受后把 x.json 改名为 x.accepted.json，避免 /accept 重复合并同一份提案 */
+	/** 接受后把 x.json 改名为 x.accepted.json，避免重复合并同一份提案 */
 	markProposalAccepted(absPath: string): string {
 		if (absPath.endsWith(".accepted.json")) return absPath;
 		const target = absPath.replace(/\.json$/, ".accepted.json");
@@ -637,7 +637,7 @@ export function acceptPlan(bb: Blackboard, proposal: { concepts?: Concept[]; uni
 
 /**
  * 把 sources 提案合并进黑板：verified 一律 false、收集台账保留，并把资料 id 挂到单元上。
- * 合并后若仍有单元或概念没有资料，发一次 sources_gap 事件（/dispatch 会把它交回馆员）。
+ * 合并后若仍有单元或概念没有资料，发一次 sources_gap 事件（下一步建议会把它译成回馆员的路由）。
  */
 export function acceptSources(bb: Blackboard, proposal: { sources?: Source[] }): number {
 	const existing = new Map(bb.sources().map((s) => [s.id, s]));
@@ -725,7 +725,7 @@ export function acceptCurate(bb: Blackboard, p: CurateProposal): { retired: numb
 	bb.saveSources(sources);
 	bb.saveUnits(units);
 	bb.markHandled(["sources_gap"]);
-	// 缺口事件的载荷保持同一形状（units / concepts），/dispatch 才能一视同仁地路由
+	// 缺口事件的载荷保持同一形状（units / concepts），下一步建议才能一视同仁地路由
 	if (p.gaps?.length) {
 		bb.emit("sources_gap", {
 			from: "curate",

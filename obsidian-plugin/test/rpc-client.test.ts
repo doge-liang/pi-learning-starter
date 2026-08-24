@@ -30,7 +30,7 @@ function makeProject(): { cwd: string; cleanup: () => void } {
 	writeFileSync(join(bb, "concepts.json"), JSON.stringify({ concepts: [] }), "utf8");
 	writeFileSync(join(bb, "path.json"), JSON.stringify({ units: [] }), "utf8");
 	writeFileSync(join(bb, "glossary.md"), "# 术语表\n", "utf8");
-	// 给 /verify 准备一份未核验资料
+	// 给核验流程准备一份未核验资料
 	writeFileSync(join(bb, "sources.json"), JSON.stringify({ sources: [{ id: "s1", title: "Source One", verified: false }] }), "utf8");
 	return { cwd, cleanup: () => rmSync(cwd, { recursive: true, force: true }) };
 }
@@ -65,12 +65,15 @@ describe("PiRpcClient 对真实 pi", { skip: launch ? false : "本机找不到 p
 		project.cleanup();
 	});
 
-	it("启动后 get_state 可用，get_commands 包含学习扩展的命令", async () => {
+	it("启动后 get_state 可用，get_commands 包含学习扩展的命令（界面收敛后只有 /learn 与内部 /go）", async () => {
 		const state = await client.getState();
 		assert.equal(state.isStreaming, false);
 		const names = (await client.getCommands()).map((c) => c.name);
-		for (const n of ["learn", "placement", "plan", "critique", "exemplar", "accept", "sources", "verify", "read", "answer", "gloss", "done", "artifact", "review", "assess", "take", "reflect", "events", "dispatch", "role"]) {
+		for (const n of ["learn", "go"]) {
 			assert.ok(names.includes(n), `缺少命令 ${n}`);
+		}
+		for (const n of ["placement", "verify", "role", "dispatch"]) {
+			assert.ok(!names.includes(n), `命令 ${n} 应已删除`);
 		}
 	});
 
@@ -85,20 +88,19 @@ describe("PiRpcClient 对真实 pi", { skip: launch ? false : "本机找不到 p
 		assert.match(note.entry.data.text, /掌握度：untouched 0/);
 	});
 
-	it("/verify s1 弹出 confirm，回应 false 后不置位；/gloss 在无角色时给 warning", async () => {
-		await client.prompt("/verify s1");
+	it("/go verify s1 弹出 confirm，回应 false 后不置位；/go gloss 对未知概念给 warning", async () => {
+		await client.prompt("/go verify s1");
 		await waitFor(() => uiRequests.some((r) => r.method === "confirm" && (r.title ?? "").includes("确认核验")));
 		// 取消后 verified 保持 false（扩展不会再发成功 notify）
 		await sleep(300);
 		assert.ok(!uiRequests.some((r) => r.method === "notify" && (r.message ?? "").includes("已标记 s1")));
-		await client.prompt("/gloss nope");
+		await client.prompt("/go gloss nope");
 		await waitFor(() => uiRequests.some((r) => r.method === "notify" && (r.message ?? "").includes("不在 concepts.json")));
 	});
 
-	it("/role placement 原地进入角色：收到 setStatus；/role none 清除", async () => {
-		await client.prompt("/role placement");
-		await waitFor(() => uiRequests.some((r) => r.method === "setStatus" && r.statusKey === "learning" && (r.statusText ?? "").includes("水平测试官")));
-		await client.prompt("/role none");
+	it("启动即进入前台（setStatus）；/go none 退出学习模式并清除状态栏", async () => {
+		await waitFor(() => uiRequests.some((r) => r.method === "setStatus" && r.statusKey === "learning" && (r.statusText ?? "").includes("前台")));
+		await client.prompt("/go none");
 		await waitFor(() => uiRequests.some((r) => r.method === "setStatus" && r.statusKey === "learning" && (r.statusText === undefined || r.statusText === null)));
 	});
 

@@ -27,19 +27,12 @@ export default class PiLearningPlugin extends Plugin {
 		this.addCommand({ id: "restart-pi", name: "重启 pi", callback: () => void this.controller.start().catch((e) => new Notice((e as Error).message)) });
 		this.addCommand({ id: "stop-pi", name: "停止 pi", callback: () => void this.controller.stop() });
 		this.addCommand({ id: "pick-session", name: "切换历史会话", callback: () => void this.activateView().then(() => this.controller.pickSession()).catch((e) => new Notice((e as Error).message)) });
-		for (const [id, name, cmd] of [
-			["learn", "黑板概览（/learn）", "/learn"],
-			["placement", "水平测试（/placement）", "/placement"],
-			["read", "开始阅读（/read）", "/read"],
-			["take", "作答测试（/take）", "/take"],
-			["events", "查看事件（/events）", "/events"],
-		] as const) {
-			this.addCommand({
-				id: `cmd-${id}`,
-				name,
-				callback: () => void this.activateView().then(() => this.controller.send(cmd)).catch((e) => new Notice((e as Error).message)),
-			});
-		}
+		// 界面收敛后学习者只有 /learn 一个命令；其余流程对前台说话，由选择框推进
+		this.addCommand({
+			id: "cmd-learn",
+			name: "黑板概览与下一步（/learn）",
+			callback: () => void this.activateView().then(() => this.controller.send("/learn")).catch((e) => new Notice((e as Error).message)),
+		});
 		this.addSettingTab(new PiLearningSettingTab(this.app, this));
 	}
 

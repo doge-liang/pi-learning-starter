@@ -1,8 +1,12 @@
 /**
- * workflow.test.ts —— 用伪造的 ExtensionAPI 跑通设计稿的五个流程（A 规划、B 阅读、C 评审、D 复盘、E 调整）。
+ * workflow.test.ts —— 用伪造的 ExtensionAPI 跑通设计稿的流程（0 水平测试、A 规划、B 阅读、C 评审、D 复盘、E 调整、F 馆藏）。
  *
  * 断言的对象是黑板文件与状态迁移，不是模型输出：模型的"判断"由测试代码直接以工具参数给出，
  * 这里检验的是"规则在代码"那一半——提案合并、掌握度上限、升降级、复习间隔、校准、事件与护栏。
+ *
+ * 界面收敛后学习者只有两个命令（/learn 与内部 /go）；推进经 bb_route_ask 与提交类工具的
+ * 尾部询问派发 "/go <route>"。测试里派发只是把消息记入 sentMessages，后续步骤手动调用
+ * pi.command("go") 模拟 pi 对派发消息的命令展开。
  */
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync, writeFileSync } from "node:fs";
@@ -12,11 +16,13 @@ import { join } from "node:path";
 import { after, before, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
 import learningExtension from "../.pi/extensions/learning/index.ts";
-import { INTERVALS, LEVELS } from "../.pi/extensions/learning/blackboard.ts";
+import { Blackboard, INTERVALS, LEVELS } from "../.pi/extensions/learning/blackboard.ts";
 import { READ_TOOLS, ROLES } from "../.pi/extensions/learning/roles.ts";
+import { nextSteps } from "../.pi/extensions/learning/route.ts";
 import { FakePi, makeCtx, makeProject, type UiScript } from "./fake-pi.ts";
 
 const repoRoot = fileURLToPath(new URL("..", import.meta.url));
+const LATER = "稍后再说";
 
 function readJson<T = any>(p: string): T {
 	return JSON.parse(readFileSync(p, "utf8")) as T;
@@ -32,9 +38,13 @@ function readJsonl<T = any>(p: string): T[] {
 function sourceIndex(bbDir: string): Record<string, any> {
 	return Object.fromEntries(readJson(join(bbDir, "sources.json")).sources.map((s: any) => [s.id, s]));
 }
-/** 最近一条 learning-note 的文本（/learn、/library、/events 等命令的输出） */
+/** 最近一条 learning-note 的文本（/learn、馆藏概览、提案接受等输出） */
 function lastNote(pi: FakePi): string {
 	return (pi.entries.filter((e) => e.customType === "learning-note").at(-1)?.data as { text: string } | undefined)?.text ?? "";
+}
+/** 最近保存的会话状态（learning-state 条目） */
+function lastState(pi: FakePi): any {
+	return pi.entries.filter((e) => e.customType === "learning-state").at(-1)?.data as any;
 }
 function daysFromToday(iso: string): number {
 	return Math.round((Date.parse(iso) - Date.parse(new Date().toISOString().slice(0, 10))) / 86400000);
@@ -61,30 +71,69 @@ describe("学习工作流（全流程）", () => {
 	});
 	after(() => project.cleanup());
 
-	it("注册了 14 个 bb_* 工具、25 个命令与 4 个事件处理器", () => {
+	it("注册了 22 个 bb_* 工具、2 个命令与 4 个事件处理器", () => {
 		const bbTools = [...pi.tools.keys()].filter((n) => n.startsWith("bb_"));
-		assert.equal(bbTools.length, 14, bbTools.join(","));
-		assert.equal(pi.commands.size, 25, [...pi.commands.keys()].join(","));
+		assert.equal(bbTools.length, 22, bbTools.join(","));
+		assert.deepEqual([...pi.commands.keys()].sort(), ["go", "learn"]);
 		assert.deepEqual([...pi.handlers.keys()].sort(), ["before_agent_start", "input", "session_start", "tool_call"]);
 	});
 
-	it("启动时无角色：只从白名单里摘掉 bb_* 工具；无画像时提示先 /placement", () => {
-		assert.deepEqual(pi.activeTools, pi.builtin);
-		assert.ok(ctx.notices.some(([, m]) => m.includes("先运行 /placement")));
+	it("启动时默认进入前台：白名单、状态栏与提示语", () => {
+		assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.concierge.tools]);
+		assert.match(ctx.statuses.get("learning") ?? "", /前台/);
+		assert.ok(ctx.notices.some(([, m]) => m.includes("直接说你想做什么")));
+	});
+
+	it("前台上下文含代码算出的下一步建议；内容不变则不再注入", async () => {
+		const r1 = await contextOf(pi, ctx);
+		assert.ok(r1?.systemPrompt.startsWith("BASE\n\n# 角色：前台"));
+		assert.ok(r1?.message?.content.includes("下一步建议"));
+		assert.ok(r1?.message?.content.includes('"placement"'), "无画像时建议水平测试");
+		const r2 = await contextOf(pi, ctx);
+		assert.equal(r2?.message, undefined);
+	});
+
+	it("bb_route_ask：无效路由被拒；选稍后则搁置；选定后派发 /go", async () => {
+		const bad = await pi.tool("bb_route_ask").execute("t", { routes: ["bogus"] }, undefined, undefined, ctx);
+		assert.match(bad.content[0].text, /无效或目标不存在/);
+		const bad2 = await pi.tool("bb_route_ask").execute("t", { routes: ["read u99"] }, undefined, undefined, ctx);
+		assert.match(bad2.content[0].text, /无效或目标不存在/);
+
+		// 选稍后：搁置并要求模型不再重提
+		uiScript.select.push(undefined);
+		const later = await pi.tool("bb_route_ask").execute("t", { routes: ["placement"] }, undefined, undefined, ctx);
+		assert.match(later.content[0].text, /稍后/);
+		assert.ok((lastState(pi).snoozed ?? []).includes("placement"), "搁置写入状态");
+
+		// 选定：派发 /go placement
+		uiScript.select.push("进入水平测试官：确定画像并定位起点");
+		const go = await pi.tool("bb_route_ask").execute("t", { routes: ["placement"] }, undefined, undefined, ctx);
+		assert.match(go.content[0].text, /已派发执行/);
+		assert.equal(pi.lastMessage(), "/go placement");
+	});
+
+	it("/learn 输出概览与建议（含已搁置标记），选稍后不执行", async () => {
+		uiScript.select.push(LATER);
+		await pi.command("learn").handler("", ctx);
+		const note = lastNote(pi);
+		assert.match(note, /领域：（未设置）/);
+		assert.match(note, /下一步建议：\n1\. 开始水平测试/);
+		assert.match(note, /［已搁置］/);
+		assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.concierge.tools], "未执行任何路由");
 	});
 
 	// ------------------------------------------------------------ 流程 0：水平测试（画像 + 诊断）
-	describe("流程 0：水平测试（/placement）", () => {
-		it("无画像时 /plan 被拒绝并指向 /placement", async () => {
+	describe("流程 0：水平测试", () => {
+		it("无画像时路由 plan 被拒并指向水平测试", async () => {
 			ctx.notices.length = 0;
-			await pi.command("plan").handler("", ctx);
-			assert.ok(ctx.notices.some(([, m]) => m.includes("/placement")));
+			await pi.command("go").handler("plan", ctx);
+			assert.ok(ctx.notices.some(([, m]) => m.includes("水平测试")));
 			assert.equal(pi.activeTools?.includes("bb_plan_propose"), false);
 		});
 
-		it("无画像时 /placement 以画像对话开场；bb_domain_set 经确认写入 domain.json，取消则不写", async () => {
+		it("/go placement 以画像对话开场；bb_domain_set 经确认写入 domain.json，取消则不写，非交互一律不通过", async () => {
 			pi.sentMessages.length = 0;
-			await pi.command("placement").handler("", ctx);
+			await pi.command("go").handler("placement", ctx);
 			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.placement.tools]);
 			assert.match(pi.lastMessage(), /^\[begin-placement\] 请开始水平测试：先通过几个问题/);
 			const ctxText = (await contextOf(pi, ctx))?.message?.content ?? "";
@@ -98,6 +147,12 @@ describe("学习工作流（全流程）", () => {
 				language: "zh",
 				preferences: { formats: ["textbook", "paper", "code"] },
 			};
+			// 非交互：闸门不通过
+			const noUi = makeCtx(pi, { cwd: project.cwd, hasUI: false });
+			const rn = await pi.tool("bb_domain_set").execute("t", params, undefined, undefined, noUi);
+			assert.match(rn.content[0].text, /非交互模式/);
+			assert.equal(readJson(join(bbDir, "domain.json")).domain, undefined);
+
 			uiScript.confirm.push(false);
 			const r0 = await pi.tool("bb_domain_set").execute("t", params, undefined, undefined, ctx);
 			assert.match(r0.content[0].text, /未确认/);
@@ -113,59 +168,75 @@ describe("学习工作流（全流程）", () => {
 			assert.deepEqual(d.preferences.languages, ["zh", "en"], "未提交的 preferences 键保留种子值");
 		});
 
-		it("已有画像时 /placement 直接进入出题；bb_placement_create 写 pending；领域不一致被拒", async () => {
+		it("已有画像时 /go placement 直接进入出题；bb_placement_create 写 pending 并弹尾部询问；领域不一致被拒", async () => {
 			pi.sentMessages.length = 0;
-			await pi.command("placement").handler("6", ctx);
+			await pi.command("go").handler("placement 6", ctx);
 			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.placement.tools]);
 			assert.match(pi.lastMessage(), /\[begin-placement\] 画像已有。phase=generate：题数上限 6/);
 			const ctxText = (await contextOf(pi, ctx))?.message?.content ?? "";
 			assert.ok(ctxText.includes("学习者画像（完整）") && ctxText.includes("深度学习框架内部原理"));
 			await assert.rejects(
-				pi.tool("bb_placement_create").execute("t", { areas: [{ area: "Python", why: "x" }], items: [{ id: "p1", area: "C++", level: "basic", type: "recall", question: "q", reference: "r", rubric: "k" }] }),
+				pi.tool("bb_placement_create").execute("t", { areas: [{ area: "Python", why: "x" }], items: [{ id: "p1", area: "C++", level: "basic", type: "recall", question: "q", reference: "r", rubric: "k" }] }, undefined, undefined, ctx),
 				/不在 areas 中/,
 			);
-			const r = await pi.tool("bb_placement_create").execute("t", {
-				areas: [
-					{ area: "Python", why: "读框架源码的前提" },
-					{ area: "微积分", why: "自动微分依赖链式法则" },
-				],
-				items: [
-					{ id: "p1", area: "Python", level: "basic", type: "recall", question: "列表与元组的区别？", reference: "可变性", rubric: "提到可变/不可变" },
-					{ id: "p2", area: "Python", level: "intermediate", type: "apply", question: "写一个装饰器记录函数调用次数", reference: "闭包+计数", rubric: "闭包、wraps" },
-					{ id: "p3", area: "微积分", level: "basic", type: "recall", question: "写出复合函数求导的链式法则", reference: "(f∘g)' = f'(g)·g'", rubric: "形式正确" },
-					{ id: "p4", area: "微积分", level: "advanced", type: "apply", question: "对 y = softmax(Wx) 的标量损失求 W 的梯度形状并说明", reference: "与 W 同形", rubric: "形状正确、说明外积" },
-				],
-			});
+			uiScript.select.push(LATER); // 尾部询问：稍后作答
+			const r = await pi.tool("bb_placement_create").execute(
+				"t",
+				{
+					areas: [
+						{ area: "Python", why: "读框架源码的前提" },
+						{ area: "微积分", why: "自动微分依赖链式法则" },
+					],
+					items: [
+						{ id: "p1", area: "Python", level: "basic", type: "recall", question: "列表与元组的区别？", reference: "可变性", rubric: "提到可变/不可变" },
+						{ id: "p2", area: "Python", level: "intermediate", type: "apply", question: "写一个装饰器记录函数调用次数", reference: "闭包+计数", rubric: "闭包、wraps" },
+						{ id: "p3", area: "微积分", level: "basic", type: "recall", question: "写出复合函数求导的链式法则", reference: "(f∘g)' = f'(g)·g'", rubric: "形式正确" },
+						{ id: "p4", area: "微积分", level: "advanced", type: "apply", question: "对 y = softmax(Wx) 的标量损失求 W 的梯度形状并说明", reference: "与 W 同形", rubric: "形状正确、说明外积" },
+					],
+				},
+				undefined,
+				undefined,
+				ctx,
+			);
 			assert.match(r.content[0].text, /4 题，2 个领域/);
+			assert.match(r.content[0].text, /稍后处理/);
 			assert.ok(readdirFirst(join(bbDir, "placement"), ".json", "pending-"));
 			assert.match(readJsonEntries(join(bbDir, "placement"))[0].kind, /placement/);
 		});
 
-		it("/take 识别水平测试：收集作答后发 [grade-placement]；bb_placement_grade 聚合、写 domain.placement、不动掌握度", async () => {
+		it("/go take 识别水平测试：收集作答后发 [grade-placement]；bb_placement_grade 聚合、写 domain.placement、尾部询问派发规划", async () => {
 			uiScript.editor.push("元组不可变", "不会", "dy/dx = f'(g(x))·g'(x)", "不知道");
 			uiScript.select.push("5", "2", "4", "1");
 			pi.sentMessages.length = 0;
-			await pi.command("take").handler("", ctx);
+			await pi.command("go").handler("take", ctx);
 			assert.match(pi.lastMessage(), /^\[grade-placement\]/);
 			const ctxText = (await contextOf(pi, ctx))?.message?.content ?? "";
 			assert.ok(ctxText.includes("待批改的水平测试") && ctxText.includes("装饰器"));
-			const r = await pi.tool("bb_placement_grade").execute("t", {
-				grades: [
-					{ id: "p1", score: 1, comment: "正确" },
-					{ id: "p2", score: 0, comment: "空白" },
-					{ id: "p3", score: 1, comment: "正确" },
-					{ id: "p4", score: 0, comment: "空白" },
-				],
-				by_area: [
-					{ area: "Python", level_reached: "basic", note: "基础扎实，缺闭包与装饰器" },
-					{ area: "微积分", level_reached: "basic", note: "会链式法则，矩阵微分未涉及" },
-				],
-				strengths: ["Python 基础", "链式法则"],
-				gaps: ["Python 闭包与装饰器", "矩阵微分"],
-				recommendations: "第一单元从计算图直接开始；在反向传播前插入矩阵微分补救单元；Python 装饰器可在读源码时顺带补。",
-			});
+			uiScript.select.push("请领域专家依据结果规划学习路径"); // 尾部询问：进入规划
+			const r = await pi.tool("bb_placement_grade").execute(
+				"t",
+				{
+					grades: [
+						{ id: "p1", score: 1, comment: "正确" },
+						{ id: "p2", score: 0, comment: "空白" },
+						{ id: "p3", score: 1, comment: "正确" },
+						{ id: "p4", score: 0, comment: "空白" },
+					],
+					by_area: [
+						{ area: "Python", level_reached: "basic", note: "基础扎实，缺闭包与装饰器" },
+						{ area: "微积分", level_reached: "basic", note: "会链式法则，矩阵微分未涉及" },
+					],
+					strengths: ["Python 基础", "链式法则"],
+					gaps: ["Python 闭包与装饰器", "矩阵微分"],
+					recommendations: "第一单元从计算图直接开始；在反向传播前插入矩阵微分补救单元；Python 装饰器可在读源码时顺带补。",
+				},
+				undefined,
+				undefined,
+				ctx,
+			);
 			assert.match(r.content[0].text, /总分 0\.5/);
 			assert.match(r.content[0].text, /Python 0\.5（basic）；微积分 0\.5（basic）/);
+			assert.equal(pi.lastMessage(), "/go plan", "尾部询问派发规划");
 			const d = readJson(join(bbDir, "domain.json"));
 			assert.equal(d.placement.overall, 0.5);
 			assert.deepEqual(d.placement.gaps, ["Python 闭包与装饰器", "矩阵微分"]);
@@ -178,8 +249,8 @@ describe("学习工作流（全流程）", () => {
 
 	// ------------------------------------------------------------ 流程 A：规划
 	describe("流程 A：规划与选材", () => {
-		it("/plan 原地进入规划者：白名单、模型偏好、会话名、状态栏、开场语", async () => {
-			await pi.command("plan").handler("", ctx);
+		it("/go plan 原地进入规划者：白名单、模型偏好、会话名、状态栏、开场语", async () => {
+			await pi.command("go").handler("plan", ctx);
 			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.planner.tools]);
 			assert.deepEqual(pi.model, { provider: "anthropic", id: "claude-opus-5" }); // 来自 .pi/learning.json 的默认配置
 			assert.match(pi.sessionName ?? "", /^planner plan \d{4}-\d{2}-\d{2}$/);
@@ -200,22 +271,21 @@ describe("学习工作流（全流程）", () => {
 			assert.equal(r2?.message, undefined);
 		});
 
-		it("/exemplar 经编辑器写入 blackboard/exemplars/，随后进入规划者上下文", async () => {
+		it("/go exemplar 经编辑器写入 blackboard/exemplars/，随后进入规划者上下文；路径参数被拒", async () => {
 			uiScript.editor.push("# CS336 大纲（节选）\n\nLecture 1: Tokenization …");
 			ctx.notices.length = 0;
-			await pi.command("exemplar").handler("cs336-syllabus", ctx);
+			await pi.command("go").handler("exemplar cs336-syllabus", ctx);
 			assert.ok(existsSync(join(bbDir, "exemplars", "cs336-syllabus.md")));
-			assert.deepEqual(pi.command("exemplar").getArgumentCompletions?.("cs")?.map((x) => x.value), ["cs336-syllabus"]);
 			const ctxText = (await contextOf(pi, ctx))?.message?.content ?? "";
 			assert.ok(ctxText.includes("学习者提供的范例") && ctxText.includes("Tokenization"));
-			await pi.command("exemplar").handler("../evil", ctx);
+			await pi.command("go").handler("exemplar ../evil", ctx);
 			assert.ok(ctx.notices.some(([, m]) => m.includes("只接受名字")));
 		});
 
 		it("bb_plan_propose 拒绝悬空前置与成环", async () => {
 			const tool = pi.tool("bb_plan_propose");
 			await assert.rejects(
-				tool.execute("t", { concepts: [{ id: "a", name: "A", tier: "core", prereqs: ["zzz"] }], units: [], notes: "" }),
+				tool.execute("t", { concepts: [{ id: "a", name: "A", tier: "core", prereqs: ["zzz"] }], units: [], notes: "" }, undefined, undefined, ctx),
 				/前置 zzz 不在提案中/,
 			);
 			await assert.rejects(
@@ -229,12 +299,15 @@ describe("学习工作流（全流程）", () => {
 						units: [],
 						notes: "",
 					},
+					undefined,
+					undefined,
+					ctx,
 				),
 				/存在环/,
 			);
 		});
 
-		it("bb_plan_propose 写入提案；/accept 合并进黑板并发 structure_ready", async () => {
+		it("bb_plan_propose 写入提案并弹尾部询问；选送评审即派发 /go critique", async () => {
 			const proposal = {
 				concepts: [
 					{ id: "tensor", name: "张量（Tensor）", tier: "core", prereqs: [] },
@@ -248,33 +321,43 @@ describe("学习工作流（全流程）", () => {
 				],
 				notes: "依据 Deep Learning (Goodfellow) 第 6 章",
 			};
-			const r = await pi.tool("bb_plan_propose").execute("t", proposal);
+			pi.sentMessages.length = 0;
+			uiScript.select.push("送独立评审（另开评审会话）");
+			const r = await pi.tool("bb_plan_propose").execute("t", proposal, undefined, undefined, ctx);
 			assert.match(r.content[0].text, /4 个概念（core 3，branch 1），2 个单元/);
 			assert.match(r.content[0].text, /- u01 张量与计算图：张量（Tensor）、计算图（Computation Graph）/);
-			assert.match(r.content[0].text, /\/critique/);
+			assert.match(r.content[0].text, /学习者选择：送独立评审/);
+			assert.equal(pi.lastMessage(), "/go critique");
 			assert.ok(existsSync(join(bbDir, "proposals")));
 		});
 
-		it("/critique 进入独立评审员：上下文含提案原文；bb_proposal_review 写评审文件；blocking 时不得 accept", async () => {
+		it("/go critique 进入独立评审员：上下文含提案原文；bb_proposal_review 写评审文件；blocking 时不得 accept", async () => {
 			pi.sentMessages.length = 0;
-			await pi.command("critique").handler("", ctx);
+			await pi.command("go").handler("critique", ctx);
 			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.critic.tools]);
 			assert.match(pi.lastMessage(), /独立审查提案/);
 			const ctxText = (await contextOf(pi, ctx))?.message?.content ?? "";
 			assert.ok(ctxText.includes("待审提案") && ctxText.includes('"autograd-graph"') && ctxText.includes("学习者画像（完整）"));
 
 			await assert.rejects(
-				pi.tool("bb_proposal_review").execute("t", { verdict: "accept", summary: "x", findings: [{ severity: "blocking", target: "u02", issue: "缺前置", suggestion: "补" }] }),
+				pi.tool("bb_proposal_review").execute("t", { verdict: "accept", summary: "x", findings: [{ severity: "blocking", target: "u02", issue: "缺前置", suggestion: "补" }] }, undefined, undefined, ctx),
 				/blocking 发现时结论必须为 revise/,
 			);
-			const r = await pi.tool("bb_proposal_review").execute("t", {
-				verdict: "revise",
-				summary: "结构可用，但反向传播单元缺少链式法则前置。",
-				findings: [
-					{ severity: "blocking", target: "u02", issue: "反向传播依赖多元微积分的链式法则，提案未作为前置概念列出", suggestion: "在 u01 与 u02 之间插入链式法则概念" },
-					{ severity: "minor", target: "jit", issue: "JIT 与目标无关", suggestion: "后置或删除" },
-				],
-			});
+			uiScript.select.push(LATER); // 尾部询问：稍后
+			const r = await pi.tool("bb_proposal_review").execute(
+				"t",
+				{
+					verdict: "revise",
+					summary: "结构可用，但反向传播单元缺少链式法则前置。",
+					findings: [
+						{ severity: "blocking", target: "u02", issue: "反向传播依赖多元微积分的链式法则，提案未作为前置概念列出", suggestion: "在 u01 与 u02 之间插入链式法则概念" },
+						{ severity: "minor", target: "jit", issue: "JIT 与目标无关", suggestion: "后置或删除" },
+					],
+				},
+				undefined,
+				undefined,
+				ctx,
+			);
 			assert.match(r.content[0].text, /结论 revise：blocking 1，major 0，minor 1/);
 			const proposalFile = bb_latestProposal();
 			const reviewJson = proposalFile.replace(/\.json$/, ".review.json");
@@ -282,20 +365,20 @@ describe("学习工作流（全流程）", () => {
 			assert.equal(readJson(reviewJson).verdict, "revise");
 		});
 
-		it("/plan revise：规划者上下文含待修改的提案与评审意见", async () => {
+		it("/go plan revise：规划者上下文含待修改的提案与评审意见", async () => {
 			pi.sentMessages.length = 0;
-			await pi.command("plan").handler("revise", ctx);
+			await pi.command("go").handler("plan revise", ctx);
 			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.planner.tools]);
 			assert.match(pi.lastMessage(), /依据黑板上下文中「对该提案的评审意见」修改/);
 			const ctxText = (await contextOf(pi, ctx))?.message?.content ?? "";
 			assert.ok(ctxText.includes("对该提案的评审意见") && ctxText.includes("链式法则") && ctxText.includes("待修改的提案"));
 		});
 
-		it("/accept 的确认框带评审结论；接受后写入黑板并发 structure_ready", async () => {
+		it("/go accept 的确认框带评审结论；接受后写入黑板并发 structure_ready", async () => {
 			uiScript.confirm.push(true);
 			ctx.confirms.length = 0;
-			await pi.command("accept").handler("", ctx);
-			assert.match(ctx.confirms[0]?.[1] ?? "", /评审结论：revise（blocking 1，major 0，minor 1）。评审员建议先修改：\/plan revise/);
+			await pi.command("go").handler("accept", ctx);
+			assert.match(ctx.confirms[0]?.[1] ?? "", /评审结论：revise（blocking 1，major 0，minor 1）。评审员建议先请提案者修改/);
 			const concepts = readJson(join(bbDir, "concepts.json")).concepts;
 			assert.equal(concepts.length, 4);
 			assert.ok(concepts.every((c: any) => c.mastery === "untouched" && Array.isArray(c.evidence)));
@@ -305,28 +388,35 @@ describe("学习工作流（全流程）", () => {
 			const events = readJsonl(join(bbDir, "events.jsonl"));
 			assert.equal(events.at(-1).type, "structure_ready");
 			assert.deepEqual(events.at(-1).payload.units, ["u01", "u02"]);
-			// 已接受的提案改名，不会被第二次 /accept 重复合并
+			// 已接受的提案改名，不会被第二次 accept 重复合并
 			assert.ok(readdirFirst(join(bbDir, "proposals"), ".accepted.json", "plan-"));
 			assert.equal(readdirFirst(join(bbDir, "proposals"), ".json", "plan-")?.endsWith(".accepted.json"), true);
 			ctx.notices.length = 0;
-			await pi.command("accept").handler("", ctx);
+			await pi.command("go").handler("accept", ctx);
 			assert.ok(ctx.notices.some(([, m]) => m.includes("没有可接受的提案")));
 		});
 
-		it("/sources 进入馆员；bb_sources_propose + /accept 挂载资料且 verified=false", async () => {
+		it("/go sources 进入馆员；bb_sources_propose + accept 挂载资料且 verified=false", async () => {
 			pi.sentMessages.length = 0;
-			await pi.command("sources").handler("", ctx);
+			await pi.command("go").handler("sources", ctx);
 			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.librarian.tools]);
 			assert.match(pi.lastMessage(), /u01, u02/);
 
-			await pi.tool("bb_sources_propose").execute("t", {
-				sources: [
-					{ id: "dl-ch6", title: "Deep Learning, Ch. 6", type: "textbook", locator: "Goodfellow et al., 2016, ch. 6.5", covers: ["tensor", "autograd-graph"], for_units: ["u01"], est_minutes: 90, quality_note: "标准教材" },
-					{ id: "cs231n-bp", title: "CS231n Backprop notes", type: "course", locator: "https://cs231n.github.io/optimization-2/", covers: ["backward"], for_units: ["u02"], est_minutes: 60, quality_note: "课程讲义", verified: true },
-				],
-			});
+			uiScript.select.push(LATER); // 尾部询问：稍后
+			await pi.tool("bb_sources_propose").execute(
+				"t",
+				{
+					sources: [
+						{ id: "dl-ch6", title: "Deep Learning, Ch. 6", type: "textbook", locator: "Goodfellow et al., 2016, ch. 6.5", covers: ["tensor", "autograd-graph"], for_units: ["u01"], est_minutes: 90, quality_note: "标准教材" },
+						{ id: "cs231n-bp", title: "CS231n Backprop notes", type: "course", locator: "https://cs231n.github.io/optimization-2/", covers: ["backward"], for_units: ["u02"], est_minutes: 60, quality_note: "课程讲义", verified: true },
+					],
+				},
+				undefined,
+				undefined,
+				ctx,
+			);
 			uiScript.confirm.push(true);
-			await pi.command("accept").handler("", ctx);
+			await pi.command("go").handler("accept", ctx);
 			const sources = readJson(join(bbDir, "sources.json")).sources;
 			assert.equal(sources.length, 2);
 			assert.ok(sources.every((s: any) => s.verified === false), "馆员无法把 verified 置为 true");
@@ -336,20 +426,19 @@ describe("学习工作流（全流程）", () => {
 			assert.ok(readJsonl(join(bbDir, "events.jsonl")).every((e) => e.type !== "structure_ready" || e.handled));
 		});
 
-		it("/verify 由学习者亲自置位 verified：指定 id、从列表选择、取消", async () => {
-			assert.deepEqual(pi.command("verify").getArgumentCompletions?.("dl")?.map((x) => x.value), ["dl-ch6"]);
+		it("/go verify 由学习者亲自置位 verified：指定 id、从列表选择、取消；bb_verify 只在前台可用", async () => {
 			uiScript.confirm.push(true);
-			await pi.command("verify").handler("dl-ch6", ctx);
+			await pi.command("go").handler("verify dl-ch6", ctx);
 			assert.equal(readJson(join(bbDir, "sources.json")).sources.find((x: any) => x.id === "dl-ch6").verified, true);
-			assert.equal(pi.command("verify").getArgumentCompletions?.("dl"), null, "已核验的不再补全");
 			// 无参数：从未核验列表中选择
 			uiScript.select.push("cs231n-bp  CS231n Backprop notes");
 			uiScript.confirm.push(false);
-			await pi.command("verify").handler("", ctx);
+			await pi.command("go").handler("verify", ctx);
 			assert.equal(readJson(join(bbDir, "sources.json")).sources.find((x: any) => x.id === "cs231n-bp").verified, false, "取消则不置位");
 			ctx.notices.length = 0;
-			await pi.command("verify").handler("nope", ctx);
+			await pi.command("go").handler("verify nope", ctx);
 			assert.ok(ctx.notices.some(([, m]) => m.includes("不在 sources.json")));
+			await assert.rejects(pi.tool("bb_verify").execute("t", {}, undefined, undefined, ctx), /concierge/);
 		});
 
 		it("bb_check_link 只在馆员角色可用", async () => {
@@ -360,24 +449,30 @@ describe("学习工作流（全流程）", () => {
 
 	// ------------------------------------------------------------ 流程 B：阅读会话
 	describe("流程 B：陪读会话", () => {
-		it("/read 进入陪读老师，单元置为 active，开场 [begin-session]", async () => {
+		it("/go read 进入陪读老师，单元置为 active，开场 [begin-session]", async () => {
 			pi.sentMessages.length = 0;
-			await pi.command("read").handler("u01", ctx);
+			await pi.command("go").handler("read u01", ctx);
 			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.tutor.tools]);
 			assert.equal(readJson(join(bbDir, "path.json")).units[0].status, "active");
 			assert.match(pi.lastMessage(), /\[begin-session\]/);
 			assert.match(ctx.statuses.get("learning") ?? "", /u01 · hint/);
 		});
 
-		it("陪读会话中，学习者的交互输入被加上 [mode: …] 前缀；扩展消息不改写", async () => {
+		it("陪读会话中，学习者的交互输入被加上 [mode: …] 前缀；bb_mode_set 经确认切换模式", async () => {
 			const r = await pi.emit("input", { text: "叶子节点是什么", source: "interactive" }, ctx);
 			assert.deepEqual(r, { action: "transform", text: "[mode: hint] 叶子节点是什么" });
 			const r2 = await pi.emit("input", { text: "x", source: "extension" }, ctx);
 			assert.deepEqual(r2, { action: "continue" });
-			await pi.command("explain").handler("", ctx);
+			uiScript.confirm.push(true);
+			const m = await pi.tool("bb_mode_set").execute("t", { mode: "explain" }, undefined, undefined, ctx);
+			assert.match(m.content[0].text, /已切换到 explain/);
 			const r3 = await pi.emit("input", { text: "请讲解", source: "interactive" }, ctx);
 			assert.equal(r3.text, "[mode: explain] 请讲解");
-			await pi.command("hint").handler("", ctx);
+			uiScript.confirm.push(false);
+			const m2 = await pi.tool("bb_mode_set").execute("t", { mode: "hint" }, undefined, undefined, ctx);
+			assert.match(m2.content[0].text, /未确认/);
+			uiScript.confirm.push(true);
+			await pi.tool("bb_mode_set").execute("t", { mode: "hint" }, undefined, undefined, ctx);
 		});
 
 		it("护栏：write/edit/bash 被拒；读取会话目录被拒；bb_* 串角色调用抛错", async () => {
@@ -392,7 +487,7 @@ describe("学习工作流（全流程）", () => {
 			await assert.rejects(pi.tool("bb_review").execute("t", { verdict: "pass", findings: [], unresolved: [] }), /只在 reviewer 角色会话中可用/);
 		});
 
-		it("bb_prequestions 登记；/answer 逐题收集作答与信心并发 [closed-book answers]", async () => {
+		it("bb_prequestions 登记；bb_collect_answers 逐题收集作答与信心并返回给老师批改", async () => {
 			await pi.tool("bb_prequestions").execute("t", {
 				questions: [
 					{ id: "q1", text: "什么是叶子节点？", concept: "tensor" },
@@ -404,36 +499,28 @@ describe("学习工作流（全流程）", () => {
 
 			uiScript.editor.push("requires_grad 为 true 且由用户创建的张量", "运算的依赖关系");
 			uiScript.select.push("4", "2");
-			pi.sentMessages.length = 0;
-			await pi.command("answer").handler("", ctx);
-			assert.match(pi.lastMessage(), /^\[mode: hint\] \[closed-book answers\]/);
-			assert.match(pi.lastMessage(), /q1: requires_grad/);
-			assert.doesNotMatch(pi.lastMessage(), /confidence/, "信心不发给老师");
+			const r = await pi.tool("bb_collect_answers").execute("t", {}, undefined, undefined, ctx);
+			assert.match(r.content[0].text, /q1: requires_grad/);
+			assert.doesNotMatch(r.content[0].text, /confidence/, "信心不发给老师");
 		});
 
-		it("/answer 中途取消不写入状态", async () => {
+		it("bb_collect_answers 中途取消不写入状态", async () => {
 			uiScript.editor.push(undefined);
-			pi.sentMessages.length = 0;
-			await pi.command("answer").handler("", ctx);
-			assert.equal(pi.sentMessages.length, 0);
+			const r = await pi.tool("bb_collect_answers").execute("t", {}, undefined, undefined, ctx);
+			assert.match(r.content[0].text, /取消了作答/);
 		});
 
-		it("/gloss 追加术语表条目并请老师核对", async () => {
+		it("bb_gloss_edit 追加术语表条目并交老师核对", async () => {
 			uiScript.editor.push("张量是带自动微分元数据的多维数组。");
-			pi.sentMessages.length = 0;
-			await pi.command("gloss").handler("tensor", ctx);
+			const r = await pi.tool("bb_gloss_edit").execute("t", { concept: "tensor" }, undefined, undefined, ctx);
 			const gl = readFileSync(join(bbDir, "glossary.md"), "utf8");
 			assert.ok(gl.includes("<!-- id: tensor -->") && gl.includes("带自动微分元数据"));
-			assert.match(pi.lastMessage(), /\[glossary check\]/);
+			assert.match(r.content[0].text, /请核对以下术语表条目/);
 			const ctxText = (await contextOf(pi, ctx))?.message?.content ?? "";
 			assert.ok(ctxText.includes("带自动微分元数据"), "术语表条目进入陪读上下文");
 		});
 
-		it("/done 发 [end-session]；bb_evidence 写证据、升级上限 learned、记错误、确认后单元完成", async () => {
-			pi.sentMessages.length = 0;
-			await pi.command("done").handler("", ctx);
-			assert.match(pi.lastMessage(), /\[end-session\]/);
-
+		it("bb_evidence 写证据、升级上限 learned、记错误、确认后单元完成", async () => {
 			uiScript.confirm.push(true);
 			const r = await pi.tool("bb_evidence").execute(
 				"t",
@@ -490,17 +577,17 @@ describe("学习工作流（全流程）", () => {
 
 	// ------------------------------------------------------------ 流程 C：评审
 	describe("流程 C：产出与评审", () => {
-		it("/review 进入评审员；bb_review 写入 md 与 json，误解入错误日志", async () => {
+		it("/go artifact 落盘产出物；/go review 进入评审员；bb_review 写入 md 与 json，误解入错误日志", async () => {
 			const artifact = join(bbDir, "artifacts", "graph.md");
 			uiScript.editor.push("# 我的计算图笔记\n\n边表示数据。");
 			ctx.notices.length = 0;
-			await pi.command("artifact").handler("graph", ctx);
-			assert.ok(existsSync(artifact), "/artifact 缺省补 .md 并落盘");
-			assert.ok(ctx.notices.some(([, m]) => m.includes("/review blackboard/artifacts/graph.md")));
-			await pi.command("artifact").handler("../evil.md", ctx);
+			await pi.command("go").handler("artifact graph", ctx);
+			assert.ok(existsSync(artifact), "缺省补 .md 并落盘");
+			assert.ok(ctx.notices.some(([, m]) => m.includes("/go review blackboard/artifacts/graph.md")));
+			await pi.command("go").handler("artifact ../evil.md", ctx);
 			assert.ok(ctx.notices.some(([, m]) => m.includes("只接受文件名")));
 			pi.sentMessages.length = 0;
-			await pi.command("review").handler(`blackboard/artifacts/graph.md u01`, ctx);
+			await pi.command("go").handler(`review blackboard/artifacts/graph.md u01`, ctx);
 			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.reviewer.tools]);
 			assert.match(pi.lastMessage(), /graph\.md/);
 			const ctxText = (await contextOf(pi, ctx))?.message?.content ?? "";
@@ -526,21 +613,29 @@ describe("学习工作流（全流程）", () => {
 
 	// ------------------------------------------------------------ 流程 D：复盘
 	describe("流程 D：出题、作答、批改", () => {
-		it("/assess 进入考评官；bb_test_create 写 pending 测试并把 unit_complete 标为已处理", async () => {
+		it("/go assess 进入考评官；bb_test_create 写 pending、标记事件并经尾部询问派发作答", async () => {
 			pi.sentMessages.length = 0;
-			await pi.command("assess").handler("5", ctx);
+			await pi.command("go").handler("assess 5", ctx);
 			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.assessor.tools]);
 			assert.match(pi.lastMessage(), /题数上限 5/);
 			const ctxText = (await contextOf(pi, ctx))?.message?.content ?? "";
 			assert.ok(ctxText.includes("到期概念") && ctxText.includes('"tensor"'), "刚 learned 且无 due 的概念视为到期");
 
-			await pi.tool("bb_test_create").execute("t", {
-				items: [
-					{ id: "t1", concept: "tensor", type: "recall", question: "用自己的话定义叶子张量。", reference: "由用户创建且 requires_grad 的张量", rubric: "提到用户创建、requires_grad" },
-					{ id: "t2", concept: "tensor", type: "discriminate", question: "叶子张量与中间张量在 grad 保存上的区别？", reference: "中间张量默认不保存 grad", rubric: "提到 retain_grad" },
-					{ id: "t3", concept: "autograd-graph", type: "apply", question: "画出 y = (a*b)+c 的计算图并标注边。", reference: "两个运算节点，三条输入边", rubric: "边表示依赖" },
-				],
-			});
+			uiScript.select.push("现在闭卷作答");
+			await pi.tool("bb_test_create").execute(
+				"t",
+				{
+					items: [
+						{ id: "t1", concept: "tensor", type: "recall", question: "用自己的话定义叶子张量。", reference: "由用户创建且 requires_grad 的张量", rubric: "提到用户创建、requires_grad" },
+						{ id: "t2", concept: "tensor", type: "discriminate", question: "叶子张量与中间张量在 grad 保存上的区别？", reference: "中间张量默认不保存 grad", rubric: "提到 retain_grad" },
+						{ id: "t3", concept: "autograd-graph", type: "apply", question: "画出 y = (a*b)+c 的计算图并标注边。", reference: "两个运算节点，三条输入边", rubric: "边表示依赖" },
+					],
+				},
+				undefined,
+				undefined,
+				ctx,
+			);
+			assert.equal(pi.lastMessage(), "/go take", "尾部询问派发作答");
 			const pending = readdirFirst(join(bbDir, "assessments"), ".json", "pending-");
 			assert.ok(pending);
 			const events = readJsonl(join(bbDir, "events.jsonl"));
@@ -548,31 +643,38 @@ describe("学习工作流（全流程）", () => {
 		});
 
 		it("bb_grade 在未收集作答时拒绝", async () => {
-			await assert.rejects(pi.tool("bb_grade").execute("t", { grades: [], outline: "", structural_gap: false, gap_note: "" }), /先运行 \/take/);
+			await assert.rejects(pi.tool("bb_grade").execute("t", { grades: [], outline: "", structural_gap: false, gap_note: "" }, undefined, undefined, ctx), /先闭卷作答/);
 		});
 
-		it("/take 在考评官会话中直接收集作答并发 [grade]", async () => {
+		it("/go take 在考评官会话中直接收集作答并发 [grade]", async () => {
 			uiScript.editor.push("用户创建、requires_grad=True", "中间张量不保存 grad", "不会画");
 			uiScript.select.push("5", "5", "1");
 			pi.sentMessages.length = 0;
-			await pi.command("take").handler("", ctx);
+			await pi.command("go").handler("take", ctx);
 			assert.match(pi.lastMessage(), /^\[grade\]/);
 			assert.match(pi.lastMessage(), /"confidence": 5/);
 			const ctxText = (await contextOf(pi, ctx))?.message?.content ?? "";
 			assert.ok(ctxText.includes("待批改的测试") && ctxText.includes("叶子张量"));
 		});
 
-		it("bb_grade：通过升级 tested 并排 1 天后复习；未通过降级 touched；校准偏差；提纲；replan_request", async () => {
-			const r = await pi.tool("bb_grade").execute("t", {
-				grades: [
-					{ id: "t1", score: 1, comment: "完整" },
-					{ id: "t2", score: 1, comment: "完整" },
-					{ id: "t3", score: 0, comment: "空白", misconception: "仍不清楚边的含义" },
-				],
-				outline: "- 掌握了叶子张量\n- 计算图仍是缺口",
-				structural_gap: true,
-				gap_note: "autograd-graph 反复出错，建议插入补救单元",
-			});
+		it("bb_grade：通过升级 tested 并排复习；未通过降级 touched；校准偏差；提纲；replan_request", async () => {
+			uiScript.select.push(LATER); // 尾部询问：稍后写复盘
+			const r = await pi.tool("bb_grade").execute(
+				"t",
+				{
+					grades: [
+						{ id: "t1", score: 1, comment: "完整" },
+						{ id: "t2", score: 1, comment: "完整" },
+						{ id: "t3", score: 0, comment: "空白", misconception: "仍不清楚边的含义" },
+					],
+					outline: "- 掌握了叶子张量\n- 计算图仍是缺口",
+					structural_gap: true,
+					gap_note: "autograd-graph 反复出错，建议插入补救单元",
+				},
+				undefined,
+				undefined,
+				ctx,
+			);
 			const text = r.content[0].text;
 			assert.match(text, /通过 \[tensor\]/);
 			assert.match(text, /未通过（降级）\[autograd-graph\]/);
@@ -608,18 +710,18 @@ describe("学习工作流（全流程）", () => {
 			assert.ok(events.some((e) => e.type === "replan_request" && !e.handled));
 		});
 
-		it("/reflect 在提纲后就地写复盘：编辑器预填提纲，未修改则不写", async () => {
+		it("/go reflect 在提纲后就地写复盘：编辑器预填提纲，未修改则不写", async () => {
 			const outline = mustFind(join(bbDir, "reflections"), "-outline.md");
 			const before = readFileSync(join(bbDir, "reflections", outline), "utf8");
 			uiScript.editor.push((prefill: string) => prefill);
 			ctx.notices.length = 0;
-			await pi.command("reflect").handler("", ctx);
+			await pi.command("go").handler("reflect", ctx);
 			assert.ok(ctx.notices.some(([, m]) => m.includes("未修改")));
 			uiScript.editor.push((prefill: string) => {
 				assert.ok(prefill.includes("我的复盘（学习者亲笔）"), "编辑器预填提纲");
 				return `${prefill}计算图的边我一直理解成数据，这次才分清依赖与数据。\n`;
 			});
-			await pi.command("reflect").handler("", ctx);
+			await pi.command("go").handler("reflect", ctx);
 			const after = readFileSync(join(bbDir, "reflections", outline), "utf8");
 			assert.ok(after.startsWith(before) && after.includes("分清依赖与数据"));
 		});
@@ -642,36 +744,45 @@ describe("学习工作流（全流程）", () => {
 	});
 
 	// ------------------------------------------------------------ 流程 E：调整路径
-	describe("流程 E：事件分发与增量重规划", () => {
-		it("/events 列出未处理事件；/dispatch 把 replan_request 交给规划者", async () => {
-			await pi.command("events").handler("", ctx);
-			const note = pi.entries.filter((e) => e.customType === "learning-note").at(-1)?.data as { text: string };
-			assert.match(note.text, /replan_request/);
+	describe("流程 E：事件驱动的增量重规划", () => {
+		it("nextSteps 把 replan_request 事件译成 plan replan 建议", () => {
+			const routes = nextSteps(new Blackboard(project.cwd)).map((s) => s.route);
+			assert.ok(routes.includes("plan replan"), routes.join(" | "));
+		});
+
+		it("/go plan replan 进入规划者做增量重规划", async () => {
 			pi.sentMessages.length = 0;
-			await pi.command("dispatch").handler("", ctx);
+			await pi.command("go").handler("plan replan", ctx);
 			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.planner.tools]);
 			assert.match(pi.lastMessage(), /增量重规划/);
 			const ctxText = (await contextOf(pi, ctx))?.message?.content ?? "";
 			assert.ok(ctxText.includes("最近测评结果") && ctxText.includes("failed"));
 		});
 
-		it("增量提案 /accept 后保留已有概念的掌握度与复习状态、已有单元的状态与资料", async () => {
-			await pi.tool("bb_plan_propose").execute("t", {
-				concepts: [
-					{ id: "tensor", name: "张量（Tensor）", tier: "core", prereqs: [] },
-					{ id: "graph-edges", name: "计算图的边（Edges）", tier: "core", prereqs: ["tensor"] },
-					{ id: "autograd-graph", name: "计算图（Computation Graph）", tier: "core", prereqs: ["graph-edges"] },
-					{ id: "backward", name: "反向传播（Backpropagation）", tier: "core", prereqs: ["autograd-graph"] },
-				],
-				units: [
-					{ id: "u01", title: "张量与计算图", concepts: ["tensor", "autograd-graph"], exercises: [], exit_criteria: [] },
-					{ id: "u01b", title: "补救：计算图的边", concepts: ["graph-edges"], exercises: ["把三段代码翻译成图"], exit_criteria: ["说明边为什么不是数据"] },
-					{ id: "u02", title: "反向传播", concepts: ["backward"], exercises: [], exit_criteria: [] },
-				],
-				notes: "插入补救单元 u01b",
-			});
+		it("增量提案接受后保留已有概念的掌握度与复习状态、已有单元的状态与资料", async () => {
+			uiScript.select.push(LATER); // 尾部询问：稍后
+			await pi.tool("bb_plan_propose").execute(
+				"t",
+				{
+					concepts: [
+						{ id: "tensor", name: "张量（Tensor）", tier: "core", prereqs: [] },
+						{ id: "graph-edges", name: "计算图的边（Edges）", tier: "core", prereqs: ["tensor"] },
+						{ id: "autograd-graph", name: "计算图（Computation Graph）", tier: "core", prereqs: ["graph-edges"] },
+						{ id: "backward", name: "反向传播（Backpropagation）", tier: "core", prereqs: ["autograd-graph"] },
+					],
+					units: [
+						{ id: "u01", title: "张量与计算图", concepts: ["tensor", "autograd-graph"], exercises: [], exit_criteria: [] },
+						{ id: "u01b", title: "补救：计算图的边", concepts: ["graph-edges"], exercises: ["把三段代码翻译成图"], exit_criteria: ["说明边为什么不是数据"] },
+						{ id: "u02", title: "反向传播", concepts: ["backward"], exercises: [], exit_criteria: [] },
+					],
+					notes: "插入补救单元 u01b",
+				},
+				undefined,
+				undefined,
+				ctx,
+			);
 			uiScript.confirm.push(true);
-			await pi.command("accept").handler("", ctx);
+			await pi.command("go").handler("accept", ctx);
 			const concepts = readJson(join(bbDir, "concepts.json")).concepts;
 			const byId = Object.fromEntries(concepts.map((c: any) => [c.id, c]));
 			assert.equal(concepts.length, 4);
@@ -689,22 +800,22 @@ describe("学习工作流（全流程）", () => {
 			assert.deepEqual(events.at(-1).payload.units, ["u01b"], "只有无资料的单元进入 structure_ready");
 		});
 
-		it("/role none 退出角色，恢复默认工具与状态栏", async () => {
-			await pi.command("role").handler("none", ctx);
+		it("/go none 退出学习模式，恢复默认工具并记住退出", async () => {
+			await pi.command("go").handler("none", ctx);
 			assert.ok(pi.activeTools?.includes("write") && pi.activeTools?.includes("bash"));
 			assert.ok(!pi.activeTools?.some((t) => t.startsWith("bb_")), "退出角色后不再暴露 bb_* 工具");
 			assert.equal(ctx.statuses.get("learning"), undefined);
 			const r = await contextOf(pi, ctx);
 			assert.equal(r, undefined, "无角色时不改系统提示");
+			assert.equal(lastState(pi).optOut, true, "明确退出被持久化");
 		});
 
-		it("命令参数补全：/read 单元、/gloss 概念、/role 角色", () => {
-			const units = pi.command("read").getArgumentCompletions?.("u0") ?? [];
-			assert.deepEqual(units.map((u) => u.value), ["u01b", "u02"], "已完成的单元不再补全");
-			const cs = pi.command("gloss").getArgumentCompletions?.("ba") ?? [];
-			assert.deepEqual(cs.map((c) => c.value), ["backward"]);
-			const rs = pi.command("role").getArgumentCompletions?.("n") ?? [];
-			assert.deepEqual(rs.map((c) => c.value), ["none"]);
+		it("/go 无参数给出用法；参数补全列出动作", async () => {
+			ctx.notices.length = 0;
+			await pi.command("go").handler("", ctx);
+			assert.ok(ctx.notices.some(([, m]) => m.includes("用法：/go")));
+			const items = pi.command("go").getArgumentCompletions?.("re") ?? [];
+			assert.deepEqual(items.map((x) => x.value), ["read", "review", "reflect"]);
 		});
 	});
 
@@ -712,54 +823,60 @@ describe("学习工作流（全流程）", () => {
 	// 放在流程 E 之后：此时黑板上正好有一个刚插入、尚无资料的补救单元 u01b，
 	// 覆盖缺口、补料、收集与整理可以在同一份数据上依次验证。
 	describe("流程 F：馆藏的收集与整理", () => {
-		it("/sources 请求替代资料：提案带获取等级、获取途径与题录元数据；/accept 后仍有缺口则发 sources_gap", async () => {
+		it("/go sources 请求替代资料：提案带获取等级、获取途径与题录元数据；接受后仍有缺口则发 sources_gap", async () => {
 			pi.sentMessages.length = 0;
-			await pi.command("sources").handler("u02 现有讲义推导跳步，需要更系统的教材", ctx);
+			await pi.command("go").handler("sources u02 现有讲义推导跳步，需要更系统的教材", ctx);
 			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.librarian.tools]);
 			assert.match(pi.lastMessage(), /理解困难/);
 
-			await pi.tool("bb_sources_propose").execute("t", {
-				sources: [
-					{
-						id: "prml",
-						title: "Pattern Recognition and Machine Learning",
-						type: "textbook",
-						locator: "Bishop, 2006, ch. 5.3",
-						covers: ["backward"],
-						for_units: ["u02"],
-						est_minutes: 120,
-						quality_note: "反向传播的标准推导",
-						alternative: true,
-						access: "paid",
-						acquire_note: "Springer 正版；图书馆索书号 QA76.87 B54",
-						meta: { authors: ["Christopher M. Bishop"], year: 2006, publisher: "Springer", isbn: "978-0387310732" },
-						tags: ["教材"],
-					},
-					{
-						id: "prml-free",
-						title: "Pattern Recognition and Machine Learning（官方免费版）",
-						type: "textbook",
-						locator: "Bishop, 2006, ch. 5.3",
-						covers: ["backward"],
-						for_units: ["u02"],
-						est_minutes: 120,
-						quality_note: "同一本书由出版方公开的免费版",
-						alternative: true,
-						access: "open",
-						acquire_note: "出版方公开的免费 PDF",
-						meta: { authors: ["Christopher M. Bishop"], year: 2006, publisher: "Springer" },
-					},
-				],
-			});
+			uiScript.select.push(LATER); // 尾部询问：稍后
+			await pi.tool("bb_sources_propose").execute(
+				"t",
+				{
+					sources: [
+						{
+							id: "prml",
+							title: "Pattern Recognition and Machine Learning",
+							type: "textbook",
+							locator: "Bishop, 2006, ch. 5.3",
+							covers: ["backward"],
+							for_units: ["u02"],
+							est_minutes: 120,
+							quality_note: "反向传播的标准推导",
+							alternative: true,
+							access: "paid",
+							acquire_note: "Springer 正版；图书馆索书号 QA76.87 B54",
+							meta: { authors: ["Christopher M. Bishop"], year: 2006, publisher: "Springer", isbn: "978-0387310732" },
+							tags: ["教材"],
+						},
+						{
+							id: "prml-free",
+							title: "Pattern Recognition and Machine Learning（官方免费版）",
+							type: "textbook",
+							locator: "Bishop, 2006, ch. 5.3",
+							covers: ["backward"],
+							for_units: ["u02"],
+							est_minutes: 120,
+							quality_note: "同一本书由出版方公开的免费版",
+							alternative: true,
+							access: "open",
+							acquire_note: "出版方公开的免费 PDF",
+							meta: { authors: ["Christopher M. Bishop"], year: 2006, publisher: "Springer" },
+						},
+					],
+				},
+				undefined,
+				undefined,
+				ctx,
+			);
 			uiScript.confirm.push(true);
-			await pi.command("accept").handler("", ctx);
+			await pi.command("go").handler("accept", ctx);
 			const byId = sourceIndex(bbDir);
 			assert.equal(byId.prml.access, "paid");
 			assert.match(byId.prml.acquire_note, /索书号/);
 			assert.deepEqual(byId.prml.meta.authors, ["Christopher M. Bishop"]);
 			assert.equal(byId.prml.verified, false);
-			const note = lastNote(pi);
-			assert.match(note, /\/collect/);
+			assert.match(lastNote(pi), /收集流程/);
 			// u01b 仍无资料、graph-edges 仍无资料覆盖 → 缺口事件
 			const gap = readJsonl(join(bbDir, "events.jsonl")).filter((e) => e.type === "sources_gap").at(-1);
 			assert.deepEqual(gap.payload.units, ["u01b"]);
@@ -767,7 +884,7 @@ describe("学习工作流（全流程）", () => {
 			assert.equal(gap.handled, false);
 		});
 
-		it("/collect 下载直链、写出 Zotero 题录并登记收集台账", async () => {
+		it("/go collect 下载直链、写出 Zotero 题录并登记收集台账", async () => {
 			// 本地 HTTP 服务代替外网：验证下载、后缀推断与台账登记，不引入网络依赖
 			const server = createServer((_req, res) => {
 				res.writeHead(200, { "Content-Type": "application/pdf" });
@@ -786,7 +903,7 @@ describe("学习工作流（全流程）", () => {
 				ctx.confirms.length = 0;
 				uiScript.confirm.push(true); // 下载
 				uiScript.confirm.push(true); // 入 Zotero
-				await pi.command("collect").handler("cs231n-bp", ctx);
+				await pi.command("go").handler("collect cs231n-bp", ctx);
 				assert.match(ctx.confirms[0][1], /保存到 blackboard/);
 
 				const cs = sourceIndex(bbDir)["cs231n-bp"];
@@ -804,12 +921,12 @@ describe("学习工作流（全流程）", () => {
 			}
 		});
 
-		it("/collect 登记学习者自备的本地副本；拿不到时记 unavailable 并提示换料", async () => {
+		it("/go collect 登记学习者自备的本地副本；拿不到时记 unavailable 并提示换料", async () => {
 			const manual = join(bbDir, "library", "dl-goodfellow.pdf");
 			writeFileSync(manual, "local copy", "utf8");
 			uiScript.input.push(manual);
 			uiScript.confirm.push(false); // 不入 Zotero
-			await pi.command("collect").handler("dl-ch6", ctx);
+			await pi.command("go").handler("collect dl-ch6", ctx);
 			const dl = sourceIndex(bbDir)["dl-ch6"];
 			assert.equal(dl.acquisition.local_path, "blackboard/library/dl-goodfellow.pdf", "项目内的路径存成相对路径");
 			assert.equal(dl.acquisition.zotero, undefined);
@@ -819,14 +936,13 @@ describe("学习工作流（全流程）", () => {
 			ctx.notices.length = 0;
 			uiScript.input.push("");
 			uiScript.select.push("unavailable  暂无渠道");
-			await pi.command("collect").handler("prml", ctx);
+			await pi.command("go").handler("collect prml", ctx);
 			assert.equal(sourceIndex(bbDir).prml.acquisition.status, "unavailable");
-			assert.ok(ctx.notices.some(([, m]) => m.includes("换一份更易得的资料")));
-			assert.deepEqual(pi.command("collect").getArgumentCompletions?.("prml")?.map((x) => x.value), ["prml", "prml-free"]);
+			assert.ok(ctx.notices.some(([, m]) => m.includes("换一份更易得")));
 		});
 
-		it("/library 按单元列出获取与核验状态并汇总缺口", async () => {
-			await pi.command("library").handler("", ctx);
+		it("/go library 按单元列出获取与核验状态并汇总缺口", async () => {
+			await pi.command("go").handler("library", ctx);
 			const text = lastNote(pi);
 			assert.match(text, /在架 4 份，已获取 2，已核验 1/);
 			assert.ok(text.includes("本地 blackboard/library/cs231n-bp.pdf"));
@@ -836,22 +952,29 @@ describe("学习工作流（全流程）", () => {
 			assert.ok(text.includes("已获取但未核验：cs231n-bp"));
 		});
 
-		it("/curate 提交整理提案；/accept 后合并、下线、排序与标签落到索引，本地副本不动", async () => {
+		it("/go curate 提交整理提案；接受后合并、下线、排序与标签落到索引，本地副本不动", async () => {
 			pi.sentMessages.length = 0;
-			await pi.command("curate").handler("", ctx);
+			await pi.command("go").handler("curate", ctx);
 			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.librarian.tools]);
 			assert.match(pi.lastMessage(), /请整理馆藏/);
 
-			await pi.tool("bb_sources_curate").execute("t", {
-				merge: [{ keep: "prml-free", drop: ["prml"], reason: "同一本书，保留可直接获取的免费版" }],
-				reorder: [{ unit: "u02", order: ["cs231n-bp", "prml-free"] }],
-				tag: [{ id: "cs231n-bp", tags: ["讲义", "反向传播"] }],
-				gaps: [{ scope: "unit", id: "u01b", note: "补救单元尚无资料", suggestion: "找一份专讲计算图边与节点区别的讲义" }],
-				notes: "合并重复入口，按主次排序",
-			});
+			uiScript.select.push(LATER); // 尾部询问：稍后
+			await pi.tool("bb_sources_curate").execute(
+				"t",
+				{
+					merge: [{ keep: "prml-free", drop: ["prml"], reason: "同一本书，保留可直接获取的免费版" }],
+					reorder: [{ unit: "u02", order: ["cs231n-bp", "prml-free"] }],
+					tag: [{ id: "cs231n-bp", tags: ["讲义", "反向传播"] }],
+					gaps: [{ scope: "unit", id: "u01b", note: "补救单元尚无资料", suggestion: "找一份专讲计算图边与节点区别的讲义" }],
+					notes: "合并重复入口，按主次排序",
+				},
+				undefined,
+				undefined,
+				ctx,
+			);
 			ctx.confirms.length = 0;
 			uiScript.confirm.push(true);
-			await pi.command("accept").handler("", ctx);
+			await pi.command("go").handler("accept", ctx);
 			assert.match(ctx.confirms[0][1], /合并 prml（Pattern Recognition and Machine Learning） → prml-free/);
 
 			const byId = sourceIndex(bbDir);
@@ -871,9 +994,11 @@ describe("学习工作流（全流程）", () => {
 			assert.deepEqual(gap.payload.units, ["u01b"]);
 		});
 
-		it("/dispatch 把 sources_gap 交回馆员补料", async () => {
+		it("sources_gap 事件进入下一步建议，路由回馆员补料", async () => {
+			const routes = nextSteps(new Blackboard(project.cwd)).map((s) => s.route);
+			assert.ok(routes.some((r) => r.startsWith("sources")), routes.join(" | "));
 			pi.sentMessages.length = 0;
-			await pi.command("dispatch").handler("", ctx);
+			await pi.command("go").handler("sources", ctx);
 			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.librarian.tools]);
 			assert.match(pi.lastMessage(), /u01b/);
 			const ctxText = (await contextOf(pi, ctx))?.message?.content ?? "";
@@ -887,7 +1012,7 @@ describe("会话切换交接与恢复", () => {
 	const project = makeProject(repoRoot);
 	after(() => project.cleanup());
 
-	it("会话已有消息时 /assess 写交接文件并切换；新实例在 session_start(new) 中接过角色，然后收到开场语", async () => {
+	it("会话已有消息时 /go assess 写交接文件并切换；新实例在 session_start(new) 中接过角色，然后收到开场语", async () => {
 		const bbDir = join(project.cwd, "blackboard");
 		writeFileSync(join(bbDir, "concepts.json"), JSON.stringify({ concepts: [{ id: "a", name: "A", mastery: "learned", evidence: [] }] }), "utf8");
 
@@ -908,9 +1033,9 @@ describe("会话切换交接与恢复", () => {
 		});
 		learningExtension(oldPi.api());
 		await oldPi.emit("session_start", { reason: "startup" }, oldCtx);
-		await oldPi.command("assess").handler("", oldCtx);
+		await oldPi.command("go").handler("assess", oldCtx);
 
-		assert.deepEqual(oldPi.activeTools, oldPi.builtin, "旧实例不原地进入角色");
+		assert.deepEqual(oldPi.activeTools, [...READ_TOOLS, ...ROLES.concierge.tools], "旧实例保持前台，不原地进入角色");
 		assert.ok(!existsSync(join(project.cwd, ".pi", "learning-handoff.json")), "交接文件被新实例消费并删除");
 		assert.deepEqual(newPi.activeTools, [...READ_TOOLS, ...ROLES.assessor.tools]);
 		assert.match(newPi.sessionName ?? "", /^assessor generate/);
@@ -924,12 +1049,12 @@ describe("会话切换交接与恢复", () => {
 		const c = makeCtx(p, { cwd: project.cwd, hasMessages: true, newSession: async () => ({ cancelled: true }) });
 		learningExtension(p.api());
 		await p.emit("session_start", { reason: "startup" }, c);
-		await p.command("assess").handler("", c);
+		await p.command("go").handler("assess", c);
 		assert.ok(!existsSync(join(project.cwd, ".pi", "learning-handoff.json")));
 		assert.ok(c.notices.some(([, m]) => m.includes("取消")));
 	});
 
-	it("/resume：从会话条目恢复角色与单元；LEARN_ROLE 在无状态时指定角色", async () => {
+	it("/resume：从会话条目恢复角色与单元；LEARN_ROLE 在无状态时指定角色；明确退出的会话不再回前台", async () => {
 		const p = new FakePi();
 		p.entries.push({ type: "custom", customType: "learning-state", data: { role: "tutor", unit: "u01", mode: "explain", prequestions: [], answers: [], responses: [] }, id: "e1" });
 		const c = makeCtx(p, { cwd: project.cwd });
@@ -948,6 +1073,14 @@ describe("会话切换交接与恢复", () => {
 		} finally {
 			delete process.env.LEARN_ROLE;
 		}
+
+		// 学习者明确退出过（optOut）：恢复会话不再自动进入前台
+		const p3 = new FakePi();
+		p3.entries.push({ type: "custom", customType: "learning-state", data: { role: null, optOut: true, mode: "hint", prequestions: [], answers: [], responses: [] }, id: "e1" });
+		const c3 = makeCtx(p3, { cwd: project.cwd });
+		learningExtension(p3.api());
+		await p3.emit("session_start", { reason: "resume" }, c3);
+		assert.deepEqual(p3.activeTools, p3.builtin, "退出过学习模式的会话保持普通助手");
 	});
 });
 

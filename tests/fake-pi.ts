@@ -25,11 +25,11 @@ export interface RegisteredCommand {
 
 /** 预置的对话框答案队列：editor / select / confirm 依次弹出时按顺序消费 */
 export interface UiScript {
-	/** 字符串直接作为编辑结果；函数则接收预填文本并返回编辑结果（用于 /reflect 这类就地编辑） */
+	/** 字符串直接作为编辑结果；函数则接收预填文本并返回编辑结果（用于复盘这类就地编辑） */
 	editor?: Array<string | undefined | ((prefill: string) => string | undefined)>;
 	select?: Array<string | undefined>;
 	confirm?: boolean[];
-	/** 单行输入框（/collect 填本地路径时用） */
+	/** 单行输入框（收集流程填本地路径时用） */
 	input?: Array<string | undefined>;
 }
 

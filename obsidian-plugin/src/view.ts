@@ -76,7 +76,7 @@ export class LearningView extends ItemView implements ControllerSurface {
 
 		// 输入
 		const inputWrap = root.createDiv({ cls: "pi-learning-input-wrap" });
-		this.inputEl = inputWrap.createEl("textarea", { cls: "pi-learning-input-area", attr: { placeholder: "对角色说话，或输入 /learn 等命令；Enter 发送，Shift+Enter 换行", rows: "3" } });
+		this.inputEl = inputWrap.createEl("textarea", { cls: "pi-learning-input-area", attr: { placeholder: "对前台或角色说话（/learn 查看黑板与建议）；Enter 发送，Shift+Enter 换行", rows: "3" } });
 		this.inputEl.addEventListener("keydown", (e) => {
 			if (e.key === "Enter" && !e.shiftKey && !e.isComposing) {
 				e.preventDefault();
