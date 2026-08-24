@@ -7,11 +7,13 @@ import { join } from "node:path";
 import { FileSystemAdapter, Notice, Plugin, type WorkspaceLeaf } from "obsidian";
 import { InstanceManager } from "./instances.ts";
 import { DEFAULT_SETTINGS, type PiLearningSettings, PiLearningSettingTab } from "./settings.ts";
+import { TriggerWatcher } from "./triggers.ts";
 import { LearningView, VIEW_TYPE } from "./view.ts";
 
 export default class PiLearningPlugin extends Plugin {
 	settings: PiLearningSettings = { ...DEFAULT_SETTINGS, roleSessions: {} };
 	manager!: InstanceManager;
+	watcher!: TriggerWatcher;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
@@ -21,6 +23,9 @@ export default class PiLearningPlugin extends Plugin {
 			this.settings.model = model;
 			void this.saveSettings();
 		};
+		// 自主触发（P3）：常驻轮询，开关与冷却读设置；默认关闭
+		this.watcher = new TriggerWatcher(this.manager, () => this.settings);
+		this.watcher.start();
 
 		this.registerView(VIEW_TYPE, (leaf: WorkspaceLeaf) => new LearningView(leaf, this.manager, () => this.settings.autoStart));
 		this.addRibbonIcon("graduation-cap", "打开 Pi Learning", () => void this.activateView());
@@ -46,6 +51,7 @@ export default class PiLearningPlugin extends Plugin {
 	}
 
 	async onunload(): Promise<void> {
+		this.watcher.stop();
 		await this.manager.stopAll();
 	}
 

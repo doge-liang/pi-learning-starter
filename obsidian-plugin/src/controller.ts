@@ -186,6 +186,17 @@ export class LearningController {
 		return this.requireClient().getMessages();
 	}
 
+	/** 最近一条助手回复的纯文本（群转写摘要用）；实例未运行或取失败为空串 */
+	async lastAssistantText(): Promise<string> {
+		const c = this.client;
+		if (!c?.running) return "";
+		try {
+			return await c.getLastAssistantText();
+		} catch {
+			return "";
+		}
+	}
+
 	/** 弹出本项目的历史会话列表，选中即切换并重载记录 */
 	async pickSession(): Promise<void> {
 		const client = this.requireClient();

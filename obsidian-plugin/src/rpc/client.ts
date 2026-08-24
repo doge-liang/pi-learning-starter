@@ -178,6 +178,10 @@ export class PiRpcClient {
 	async getMessages(): Promise<AgentMessage[]> {
 		return this.data<{ messages: AgentMessage[] }>(await this.send({ type: "get_messages" })).messages;
 	}
+	/** 最近一条助手回复的纯文本（群转写落盘用）；没有则为空串 */
+	async getLastAssistantText(): Promise<string> {
+		return this.data<{ text: string | null }>(await this.send({ type: "get_last_assistant_text" })).text ?? "";
+	}
 	async getCommands(): Promise<RpcCommandInfo[]> {
 		return this.data<{ commands: RpcCommandInfo[] }>(await this.send({ type: "get_commands" })).commands;
 	}
