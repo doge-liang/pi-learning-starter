@@ -1,0 +1,65 @@
+# CI：两个包、两套系统的全量验证。
+#
+# - extension：根包 `npm run check` = tsc --strict + node --test（全流程、跨进程锁、
+#   hub 护栏、群转写注入、下载与入库——全部离线，本地 HTTP 代替外网，不调用模型）。
+# - plugin：obsidian-plugin `npm run check` = tsc + esbuild 构建 + node --test，
+#   其中 RPC 用例经 locatePi 使用根包 node_modules 里的 pi 拉起真实子进程（仍不调模型），
+#   因此先安装根包依赖。
+#
+# Node 24：脚本以 `node --test **/*.test.ts` 直跑 TypeScript，依赖免旗标的类型剥离。
+# Windows 为主要开发环境，Ubuntu 提供跨平台增量（路径、进程、文件锁的行为差异）。
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  extension:
+    name: extension / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: package-lock.json
+      # --ignore-scripts 与 README 安装说明一致（跳过 pi 的安装脚本；本仓库无需原生构建）
+      - run: npm ci --ignore-scripts
+      - run: npm run check
+
+  plugin:
+    name: plugin / ${{ matrix.os }}
+    runs-on: ${{ matrix.os }}
+    timeout-minutes: 15
+    strategy:
+      fail-fast: false
+      matrix:
+        os: [ubuntu-latest, windows-latest]
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 24
+          cache: npm
+          cache-dependency-path: |
+            package-lock.json
+            obsidian-plugin/package-lock.json
+      # 根包依赖：插件的 RPC 测试经 locatePi 使用这里的 pi（找不到会静默跳过，装上才是真验证）
+      - run: npm ci --ignore-scripts
+      # 插件依赖不加 --ignore-scripts：esbuild 需要安装脚本落二进制
+      - run: npm ci
+        working-directory: obsidian-plugin
+      - run: npm run check
+        working-directory: obsidian-plugin

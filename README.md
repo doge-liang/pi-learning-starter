@@ -1,5 +1,7 @@
 # pi 学习工作流（starter）
 
+[![CI](https://github.com/doge-liang/pi-learning-starter/actions/workflows/ci.yml/badge.svg)](https://github.com/doge-liang/pi-learning-starter/actions/workflows/ci.yml)
+
 设计稿「五个 Agent 与一块黑板」在 pi 上的最小实现。黑板是 `blackboard/` 目录，八个角色（前台，五个学习角色，加定位起点的水平测试官、独立的提案评审员）是八段系统提示加各自的工具白名单，规则写在 `.pi/extensions/learning/` 的 bb_* 工具里，角色会话的隔离靠 pi 的会话机制。完整的设计说明见 [IMPLEMENTATION-PLAN.md](IMPLEMENTATION-PLAN.md)。
 
 学习者的界面刻意收敛：一个对话入口（前台，Concierge）加各处的对话框，命令只剩 `/learn`（概览与建议）与内部的 `/go`。下一步去哪由代码从黑板算出、以选择框呈现，学习者点选即可；接受提案、下载入库、核验、闭卷作答这些节点仍由学习者在对话框里亲自裁决——模型只掌握时机，对话框里的内容与后果都在代码里。
