@@ -1,8 +1,8 @@
 /**
  * library.ts —— 馆藏：本地副本的下载与命名、获取清单的呈现、馆藏概览与覆盖缺口。
  *
- * 这里是「收集」的执行面，只由 /collect 与 /library 命令调用，不暴露给模型：
- * 角色会话里资料管理员仍然只负责定位、判定获取等级与整理索引。
+ * 这里是「收集」的执行面，由 actions.ts 的收集流程与馆藏概览（/go、前台工具）调用：
+ * 每一步经学习者确认；资料管理员仍然只负责定位、判定获取等级与整理索引。
  */
 import { existsSync, mkdirSync, statSync, writeFileSync } from "node:fs";
 import { basename, extname, join } from "node:path";
@@ -22,7 +22,7 @@ const EXT_BY_TYPE: Record<string, string> = {
 };
 
 const DEFAULT_MAX_MB = 64;
-/** 下载与上传的默认超时；慢速链路上大文件仍应手工下载后用 /collect 填路径 */
+/** 下载与上传的默认超时；慢速链路上大文件仍应手工下载后在收集流程里填路径 */
 export const TRANSFER_TIMEOUT_MS = 120_000;
 export const API_TIMEOUT_MS = 30_000;
 
@@ -100,7 +100,7 @@ export async function download(
 		disposition = res.headers.get("content-disposition");
 		const declared = Number(res.headers.get("content-length") ?? "");
 		if (Number.isFinite(declared) && declared > maxBytes) {
-			throw new Error(`文件 ${(declared / 1048576).toFixed(1)} MB 超过上限 ${maxBytes / 1048576} MB；请手工下载后在 /collect 里填本地路径。`);
+			throw new Error(`文件 ${(declared / 1048576).toFixed(1)} MB 超过上限 ${maxBytes / 1048576} MB；请手工下载后在收集流程里填本地路径。`);
 		}
 		buf = Buffer.from(await res.arrayBuffer());
 	} finally {
@@ -210,11 +210,11 @@ export function libraryReport(bb: Blackboard, cwd: string, cfg: LibraryConfig | 
 	const gapLines = [
 		gaps.units.length ? `单元无资料：${gaps.units.join("、")}` : "",
 		gaps.concepts.length ? `概念无资料：${gaps.concepts.join("、")}` : "",
-		unobtained.length ? `未获取：${unobtained.join("、")}　→ /collect <资料id>` : "",
-		unverified.length ? `已获取但未核验：${unverified.join("、")}　→ /verify <资料id>` : "",
+		unobtained.length ? `未获取：${unobtained.join("、")}` : "",
+		unverified.length ? `已获取但未核验：${unverified.join("、")}` : "",
 	].filter(Boolean);
 	if (gapLines.length) out.push("", "缺口：", ...gapLines.map((l) => `  ${l}`));
-	if (gaps.units.length || gaps.concepts.length) out.push("  补料与整理：/sources 补，/curate 整理");
+	if (gaps.units.length || gaps.concepts.length) out.push("  补料与整理：对前台说明即可，由资料管理员处理");
 	return out.join("\n");
 }
 

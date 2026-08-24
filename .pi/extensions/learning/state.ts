@@ -3,15 +3,15 @@
  *
  * 持久化两条路：
  * 1. pi.appendEntry("learning-state", state)：随会话文件保存，/resume 后在 session_start 中恢复；
- * 2. 交接文件 .pi/learning-handoff.json：/read、/assess 等命令通过 ctx.newSession 切到新会话时，
- *    旧扩展实例把目标角色写进文件，新实例在 session_start(reason="new") 中读取并删除。
+ * 2. 交接文件 .pi/learning-handoff.json：路由命令（/go，通常由 bb_route_ask 派发）通过 ctx.newSession
+ *    切到新会话时，旧扩展实例把目标角色写进文件，新实例在 session_start(reason="new") 中读取并删除。
  */
 import { existsSync, mkdirSync, readFileSync, unlinkSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { CONFIG_DIR_NAME, type ExtensionAPI, type ExtensionContext } from "@earendil-works/pi-coding-agent";
 
-export type Role = "placement" | "planner" | "critic" | "librarian" | "tutor" | "reviewer" | "assessor";
-export const ROLE_NAMES: Role[] = ["placement", "planner", "critic", "librarian", "tutor", "reviewer", "assessor"];
+export type Role = "concierge" | "placement" | "planner" | "critic" | "librarian" | "tutor" | "reviewer" | "assessor";
+export const ROLE_NAMES: Role[] = ["concierge", "placement", "planner", "critic", "librarian", "tutor", "reviewer", "assessor"];
 
 export interface PreQuestion {
 	id: string;
@@ -32,21 +32,25 @@ export interface LearningState {
 	mode: "hint" | "explain";
 	/** 陪读老师登记的预问题（bb_prequestions 写入） */
 	prequestions: PreQuestion[];
-	/** /answer 收集的闭卷作答（含信心），由 bb_evidence 合并进证据 */
+	/** bb_collect_answers 收集的闭卷作答（含信心），由 bb_evidence 合并进证据 */
 	answers: LearnerAnswer[];
-	/** 复盘或水平测试：/take 收集的作答与所属测试文件（相对 blackboard/，assessments/ 或 placement/ 下） */
+	/** 复盘或水平测试：作答路由（/go take）收集的作答与所属测试文件（相对 blackboard/，assessments/ 或 placement/ 下） */
 	testFile?: string;
 	responses: LearnerAnswer[];
 	/** 评审：产出物路径 */
 	artifact?: string;
-	/** 提案评审：待审提案的绝对路径（/critique 设置） */
+	/** 提案评审：待审提案的绝对路径（进入评审员时设置） */
 	proposal?: string;
+	/** 学习者在路由询问里选择「稍后」的建议 key；bb_route_ask 不再主动重提，/learn 仍会列出 */
+	snoozed?: string[];
+	/** 学习者明确退出学习模式（路由 none）；该会话不再自动进入前台 */
+	optOut?: boolean;
 	/** 上一次注入的上下文哈希，避免重复注入 */
 	contextHash?: string;
 }
 
 export function emptyState(): LearningState {
-	return { role: null, mode: "hint", prequestions: [], answers: [], responses: [] };
+	return { role: null, mode: "hint", prequestions: [], answers: [], responses: [], snoozed: [] };
 }
 
 const ENTRY_TYPE = "learning-state";

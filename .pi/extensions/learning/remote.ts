@@ -5,7 +5,7 @@
  *   iCloud、坚果云都有本地同步目录，这条路不需要任何凭据，也不受各家 API 限制。
  * - webdav 模式：直接 PUT 到 WebDAV 服务器（坚果云、Nextcloud 等），凭据从环境变量取。
  *
- * 只被 /collect 命令调用；模型没有调用路径。
+ * 只被逐步确认的收集流程（actions.ts 的 runCollect）调用；每一步经学习者确认。
  */
 import { copyFileSync, mkdirSync, readFileSync, statSync } from "node:fs";
 import { basename, dirname, join } from "node:path";

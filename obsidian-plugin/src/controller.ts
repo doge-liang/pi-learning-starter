@@ -226,7 +226,7 @@ export class LearningController {
 	}
 
 	private handleEvent(e: RpcEvent): void {
-		// 扩展触发的会话切换（/read、/assess 等）不会有专门事件：在每轮开始时核对一次 sessionFile
+		// 扩展触发的会话切换（/go 的进入角色路由）不会有专门事件：在每轮开始时核对一次 sessionFile
 		if (e.type === "agent_start" || e.type === "agent_settled") void this.refreshState();
 		if (e.type === "agent_start" && this.state) this.state.isStreaming = true;
 		if (e.type === "agent_settled" && this.state) this.state.isStreaming = false;

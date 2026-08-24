@@ -3,10 +3,11 @@
  *
  * 结构映射（设计稿 → pi）：
  * - 黑板              → 项目里的 blackboard/ 目录（blackboard.ts）
- * - 七个角色          → 七段系统提示 + 各自的工具白名单（roles.ts），通过 before_agent_start 注入
- * - 规则在代码        → bb_* 工具内部的状态机与阈值（tools.ts、blackboard.ts）
- * - 角色会话隔离      → pi 会话：流程命令用 ctx.newSession 切换，角色经交接文件传递（state.ts）
- * - 学习者交互        → 斜杠命令 + ctx.ui 对话框（commands.ts）
+ * - 八个角色          → 八段系统提示 + 各自的工具白名单（roles.ts），通过 before_agent_start 注入
+ * - 规则在代码        → bb_* 工具内部的状态机与阈值（tools.ts、blackboard.ts、route.ts）
+ * - 角色会话隔离      → pi 会话：/go 路由用 ctx.newSession 切换，角色经交接文件传递（state.ts）
+ * - 学习者交互        → 默认进入前台角色对话；推进与闸门经对话框收口（bb_route_ask、尾部询问、
+ *                       actions.ts 的收集 / 核验 / 编辑器流程）；仅存 /learn 与内部 /go 两个命令
  * - 定时触发          → LEARN_ROLE=assessor pi -p -a "..."（见 scripts/）
  */
 import { join } from "node:path";
@@ -33,6 +34,7 @@ export default function (pi: ExtensionAPI) {
 	/** 进入（或退出）角色：设置工具白名单、模型偏好、会话名与状态栏 */
 	async function applyRole(role: Role | null, partial: Partial<LearningState>, sessionName: string | undefined, ctx: ExtensionContext) {
 		state = { ...state, ...partial, role, contextHash: undefined };
+		if (role) state.optOut = undefined; // 重新进入任一角色即视为回到学习模式
 		if (role) {
 			pi.setActiveTools([...READ_TOOLS, ...ROLES[role].tools]);
 			const pref = readConfig(ctx.cwd).models?.[role];
@@ -70,7 +72,7 @@ export default function (pi: ExtensionAPI) {
 		state = restore(ctx) ?? emptyState();
 		let sessionName: string | undefined;
 
-		// 1. 会话切换交接（/read、/assess 等命令写入；只在新会话中消费）
+		// 1. 会话切换交接（/go 的进入角色路由写入；只在新会话中消费）
 		const handoff = takeHandoff(ctx.cwd);
 		if (handoff && (event.reason === "new" || event.reason === "startup")) {
 			const { sessionName: name, ...rest } = handoff;
@@ -83,19 +85,15 @@ export default function (pi: ExtensionAPI) {
 
 		if (state.role) {
 			await applyRole(state.role, {}, sessionName, ctx);
-		} else {
-			// 无角色的普通会话：从当前白名单里摘掉 bb_*，其余（含 --tools 等配置）保持不动
-			pi.setActiveTools(nonBlackboardTools(pi.getActiveTools()));
-			if (event.reason === "startup" && ctx.hasUI && bb.exists()) {
-				ctx.ui.notify(
-					!bb.domain().domain
-						? "学习工作流已加载：先运行 /placement 做水平测试（先聊几句确定目标，再闭卷定位起点），再 /plan 规划。"
-						: !bb.domain().placement && bb.concepts().length === 0
-							? "学习工作流已加载：画像已有；建议 /placement 做水平测试，再 /plan 规划。"
-							: "学习工作流已加载：/learn 查看黑板；/plan、/sources、/read、/review、/assess 进入各角色。",
-					"info",
-				);
+		} else if (bb.exists() && !state.optOut) {
+			// 默认人格：前台。学习者直接说话即可，命令只剩 /learn（概览与推进）与内部的 /go。
+			await applyRole("concierge", {}, sessionName, ctx);
+			if (event.reason === "startup" && ctx.hasUI) {
+				ctx.ui.notify("学习工作流已加载：直接说你想做什么，前台会安排下一步；/learn 查看黑板与建议。要维护本项目就说「退出学习模式」。", "info");
 			}
+		} else {
+			// 没有黑板的目录：从当前白名单里摘掉 bb_*，其余（含 --tools 等配置）保持不动
+			pi.setActiveTools(nonBlackboardTools(pi.getActiveTools()));
 		}
 	});
 

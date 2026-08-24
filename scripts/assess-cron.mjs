@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // 跨平台的无人值守出题脚本（等价于 assess-cron.sh，供 Windows 任务计划程序或任何有 node 的环境使用）。
-// 作答仍由学习者在交互模式中用 /take 完成。
+// 作答仍由学习者在交互模式中完成（前台的 /learn 建议会列出待作答的测试）。
 //
 // 用法：node scripts/assess-cron.mjs [--force] [--max 8]
 //   PI_BIN=<pi 可执行文件路径> 可覆盖 pi 的定位方式。

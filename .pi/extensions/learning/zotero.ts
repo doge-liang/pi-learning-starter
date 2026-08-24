@@ -6,7 +6,7 @@
  * - connector 打本地 Zotero 桌面端的连接器端口（浏览器插件用的同一个），题录直接落库。
  * - web       Zotero Web API：建题录，并把本地副本作为附件按官方三步流程上传。
  *
- * 与黑板的其他部分一样，这里只被 /collect 命令调用；模型没有调用路径。
+ * 与黑板的其他部分一样，这里只被逐步确认的收集流程（actions.ts 的 runCollect）调用。
  */
 import { createHash } from "node:crypto";
 import { basename, join } from "node:path";
