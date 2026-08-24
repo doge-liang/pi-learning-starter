@@ -42,6 +42,8 @@ export class FakePi {
 	model: unknown = null;
 	sessionName: string | undefined;
 	sentMessages: string[] = [];
+	/** 与 sentMessages 同步的 options（断言派发的 deliverAs / expandPromptTemplates 用） */
+	sentMessageOptions: Array<Record<string, unknown> | undefined> = [];
 	renderers = new Map<string, AnyFn>();
 	/** 内置工具名，供 getAllTools 与默认白名单使用 */
 	builtin = ["read", "write", "edit", "bash", "grep", "find", "ls"];
@@ -80,8 +82,9 @@ export class FakePi {
 			setSessionName(name: string) {
 				self.sessionName = name;
 			},
-			sendUserMessage(text: string) {
+			sendUserMessage(text: string, options?: Record<string, unknown>) {
 				self.sentMessages.push(text);
+				self.sentMessageOptions.push(options);
 			},
 			sendMessage() {},
 			getCommands() {

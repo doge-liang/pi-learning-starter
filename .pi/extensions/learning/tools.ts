@@ -94,8 +94,9 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
 		const pick = await ctx.ui.select(title, [...labels, LATER]);
 		if (!pick || pick === LATER) return `\n学习者选择稍后处理；不要催促。${hint}`;
 		const chosen = opts[labels.indexOf(pick)];
-		pi.sendUserMessage(`/go ${chosen.route}`, { expandPromptTemplates: true });
-		return `\n学习者选择：${pick}。已派发执行。${hint}`;
+		// followUp：排到当前回合结束后再执行，避免会话切换把正在收尾的回合掐断
+		pi.sendUserMessage(`/go ${chosen.route}`, { deliverAs: "followUp", expandPromptTemplates: true });
+		return `\n学习者选择：${pick}。已派发，将在本回合结束后执行。${hint}`;
 	}
 
 	// ------------------------------------------------------------------ 通用
@@ -150,8 +151,8 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
 				deps.persist();
 				return text("学习者选择稍后。不要再主动重提这些建议；学习者自己提起时再处理。");
 			}
-			pi.sendUserMessage(`/go ${rendered[labels.indexOf(pick)].route}`, { expandPromptTemplates: true });
-			return text(`学习者选择：${pick}。已派发执行，本轮不需要你再推进别的。`);
+			pi.sendUserMessage(`/go ${rendered[labels.indexOf(pick)].route}`, { deliverAs: "followUp", expandPromptTemplates: true });
+			return text(`学习者选择：${pick}。已派发，将在本回合结束后执行；本轮不需要你再推进别的。`);
 		},
 	});
 
@@ -649,7 +650,7 @@ ${summary}
 		name: "bb_gloss_edit",
 		label: "打开术语表编辑器",
 		description: "学习者想为某概念写术语表条目时调用：弹出编辑器由学习者亲笔填写，条目追加到 glossary.md。工具返回条目全文，随后只核对准确性、完整性与依赖标注，不代写。",
-		parameters: Type.Object({ concept: Type.String({ description: "概念 id" }) }),
+		parameters: Type.Object({ concept: Type.String({ description: "概念 id；按学习者所说的名称在黑板上下文「全部概念索引」里查对应 id，本单元之外的概念也可以写" }) }),
 		executionMode: "sequential",
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			requireRole(deps.state(), "tutor");
