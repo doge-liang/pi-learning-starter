@@ -12,10 +12,12 @@ const NL = String.fromCharCode(10);
 
 describe("sessionDirFor", () => {
 	it("与 pi 的 SessionManager 规则一致：去掉开头斜杠，/ \\ : 换成 -，前后加 --", () => {
-		const d = sessionDirFor("D:\\Workspace\\project\\pi-learning-starter", "C:\\agent");
-		assert.ok(d.endsWith(join("sessions", "--D--Workspace-project-pi-learning-starter--")), d);
-		if (process.platform !== "win32") {
-			// Windows 上 resolve("/home/u/proj") 会加上盘符，只在类 Unix 上检验
+		// resolve() 只对本平台的绝对路径保持原样（Windows 路径在 Unix 上是相对路径，反之亦然），
+		// 因此两种形态各在自己的平台上检验
+		if (process.platform === "win32") {
+			const d = sessionDirFor("D:\\Workspace\\project\\pi-learning-starter", "C:\\agent");
+			assert.ok(d.endsWith(join("sessions", "--D--Workspace-project-pi-learning-starter--")), d);
+		} else {
 			const u = sessionDirFor("/home/u/proj", "/home/u/.pi/agent");
 			assert.ok(u.endsWith(join("sessions", "--home-u-proj--")), u);
 		}
