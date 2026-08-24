@@ -15,8 +15,8 @@ import { collectAnswers, editArtifact, editExemplar, editGloss, editReflection, 
 import { type Blackboard, today } from "./blackboard.ts";
 import { readConfig } from "./config.ts";
 import { libraryReport } from "./library.ts";
-import { kickoff } from "./roles.ts";
-import { nextSteps, parseRoute, ROUTE_ACTIONS } from "./route.ts";
+import { kickoff, ROLES } from "./roles.ts";
+import { hubMode, nextSteps, parseRoute, ROUTE_ACTIONS } from "./route.ts";
 import { type LearningState, type Role, takeHandoff, writeHandoff } from "./state.ts";
 import { applyProposal } from "./tools.ts";
 
@@ -34,8 +34,21 @@ export interface CommandDeps {
 export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
 	const { bb } = deps;
 
-	/** 进入角色：会话为空则原地进入，否则切到新会话并交接 */
+	/**
+	 * 进入角色：会话为空则原地进入，否则切到新会话并交接。
+	 * hub（常驻实例）模式下角色固定在实例上：同角色原地重进（重设单元等参数），
+	 * 跨角色一律不切会话，提示学习者用 @ 唤醒对应实例。
+	 */
 	async function enter(ctx: ExtensionCommandContext, role: Role, partial: Partial<LearningState>, sessionName: string, kick: string) {
+		if (hubMode()) {
+			const current = deps.state().role;
+			if (current && current !== role) {
+				return ctx.ui.notify(`常驻实例模式下不切换角色：请用 @${ROLES[role].label.split("（")[0]} 唤醒对应实例。`, "warning");
+			}
+			await deps.applyRole(role, partial, undefined, ctx);
+			pi.sendUserMessage(kick);
+			return;
+		}
 		const hasMessages = ctx.sessionManager.getBranch().some((e) => e.type === "message");
 		if (!hasMessages) {
 			await deps.applyRole(role, partial, sessionName, ctx);
@@ -100,7 +113,7 @@ export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
 				const ok = ctx.hasUI ? await ctx.ui.confirm("接受提案？", `${summary}${reviewLine}\n\n接受后写入黑板。要修改请回到该角色会话说明，由其重新提交。`) : false;
 				if (!ok) return;
 				try {
-					deps.note(ctx, applyProposal(bb, file));
+					deps.note(ctx, await bb.mutate(() => applyProposal(bb, file)));
 				} catch (e) {
 					ctx.ui.notify(String((e as Error).message ?? e), "error");
 				}
@@ -166,6 +179,7 @@ export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
 				return;
 			}
 			case "none": {
+				if (hubMode()) return ctx.ui.notify("常驻实例的角色是固定的，不支持退出学习模式；维护项目请在终端里进行。", "warning");
 				await deps.applyRole(null, { optOut: true }, undefined, ctx);
 				ctx.ui.notify("已退出学习模式，恢复普通编码助手（含文件写入与 shell）。", "info");
 				return;

@@ -35,7 +35,8 @@ import {
 } from "./blackboard.ts";
 import { readConfig } from "./config.ts";
 import { libraryReport } from "./library.ts";
-import { renderRoute, ROUTE_ACTIONS } from "./route.ts";
+import { ROLES } from "./roles.ts";
+import { hubMode, renderRoute, ROUTE_ACTIONS, targetRoleOfRoute } from "./route.ts";
 import type { LearningState, Role } from "./state.ts";
 
 export interface ToolDeps {
@@ -64,18 +65,37 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
 		pi.appendEntry("learning-note", { text: t });
 	}
 
+	/** 常驻实例模式下用于提示学习者 @ 的短角色名 */
+	function shortLabel(role: Role): string {
+		return ROLES[role].label.split("（")[0];
+	}
+
 	/**
 	 * 尾部询问：向学习者弹一次选择框，选定的路由派发给 /go 执行。
 	 * 选项文字由调用处的代码拼装；永远附带「稍后再说」。返回给模型的是学习者的选择结果。
+	 * 常驻实例（hub）模式下过滤掉跨角色的选项，改为提示学习者用 @ 唤醒对应实例。
 	 */
 	async function askNext(ctx: ExtensionContext, title: string, options: Array<{ label: string; route: string }>): Promise<string> {
-		if (!ctx.hasUI || !options.length) return "";
-		const labels = options.map((o) => o.label);
+		let opts = options;
+		let hint = "";
+		if (hubMode()) {
+			const role = deps.state().role;
+			const dropped = options.filter((o) => {
+				const t = targetRoleOfRoute(bb, o.route);
+				return t !== null && t !== role;
+			});
+			opts = options.filter((o) => !dropped.includes(o));
+			if (dropped.length) {
+				hint = `\n跨角色的下一步请让学习者用 @ 唤醒对应实例：${dropped.map((o) => `@${shortLabel(targetRoleOfRoute(bb, o.route) as Role)}（${o.label}）`).join("；")}。`;
+			}
+		}
+		if (!ctx.hasUI || !opts.length) return hint;
+		const labels = opts.map((o) => o.label);
 		const pick = await ctx.ui.select(title, [...labels, LATER]);
-		if (!pick || pick === LATER) return "\n学习者选择稍后处理；不要催促。";
-		const chosen = options[labels.indexOf(pick)];
+		if (!pick || pick === LATER) return `\n学习者选择稍后处理；不要催促。${hint}`;
+		const chosen = opts[labels.indexOf(pick)];
 		pi.sendUserMessage(`/go ${chosen.route}`, { expandPromptTemplates: true });
-		return `\n学习者选择：${pick}。已派发执行。`;
+		return `\n学习者选择：${pick}。已派发执行。${hint}`;
 	}
 
 	// ------------------------------------------------------------------ 通用
@@ -108,6 +128,17 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
 			const bad = rendered.filter((r) => !r.label);
 			if (bad.length) {
 				return text(`这些路由无效或目标不存在：${bad.map((b) => b.route).join("；")}。可用动作：${ROUTE_ACTIONS.join(", ")}。请修正后重试。`);
+			}
+			if (hubMode()) {
+				const cross = rendered.filter((r) => {
+					const t = targetRoleOfRoute(bb, r.route);
+					return t !== null && t !== state.role;
+				});
+				if (cross.length) {
+					return text(
+						`常驻实例模式下不切换角色。请告诉学习者用 @ 唤醒对应实例：${cross.map((c) => `@${shortLabel(targetRoleOfRoute(bb, c.route) as Role)}（${c.label}）`).join("；")}。本工具只用于角色无关的动作（accept / take / collect / verify / library / reflect / artifact / exemplar / gloss）或本角色内的路由。`,
+					);
+				}
 			}
 			const labels = rendered.map((r) => r.label as string);
 			const pick = await ctx.ui.select("接下来做什么？", [...labels, LATER]);
@@ -234,7 +265,7 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
 				.join("\n");
 			const ok = await ctx.ui.confirm("写入 domain.json？", summary);
 			if (!ok) return text("学习者未确认写入。请根据学习者的补充修改后重新提交 bb_domain_set。");
-			bb.saveDomain(params);
+			await bb.mutate(() => bb.saveDomain(params));
 			const state = deps.state();
 			state.contextHash = undefined;
 			deps.persist();
@@ -268,7 +299,7 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
 			const areaNames = new Set(params.areas.map((a) => a.area));
 			for (const it of params.items) if (!areaNames.has(it.area)) throw new Error(`题目 ${it.id} 的领域 ${it.area} 不在 areas 中`);
 			const rel = `placement/pending-${stamp()}.json`;
-			bb.writeJson(rel, { date: today(), kind: "placement", areas: params.areas, items: params.items });
+			await bb.mutate(() => bb.writeJson(rel, { date: today(), kind: "placement", areas: params.areas, items: params.items }));
 			const asked = await askNext(ctx, `水平测试已就绪（${params.items.length} 题，${params.areas.length} 个领域），现在闭卷作答？`, [
 				{ label: "现在闭卷作答", route: "take" },
 			]);
@@ -295,29 +326,32 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
 			if (!state.testFile || !state.testFile.startsWith("placement/") || !state.responses.length) {
 				throw new Error("尚未收集学习者作答：请学习者先闭卷作答水平测试（bb_route_ask 提议 take），再进行批改。");
 			}
-			const test = bb.readJson<{ items: Array<{ id: string; area: string; level: string }> }>(state.testFile, { items: [] });
-			const grades = new Map(params.grades.map((g) => [g.id, g]));
-			const levelOf = new Map(params.by_area.map((a) => [a.area, a]));
-			// 规则在代码：按领域聚合得分；层级判断由模型给出，分数由工具算
-			const byArea = new Map<string, number[]>();
-			for (const it of test.items) byArea.set(it.area, [...(byArea.get(it.area) ?? []), Number(grades.get(it.id)?.score ?? 0)]);
-			const areaRows = [...byArea].map(([area, scores]) => ({
-				area,
-				score: round3(scores.reduce((a, b) => a + b, 0) / scores.length),
-				items: scores.length,
-				level_reached: levelOf.get(area)?.level_reached ?? "none",
-				note: levelOf.get(area)?.note,
-			}));
-			const all = test.items.map((it) => Number(grades.get(it.id)?.score ?? 0));
-			const overall = all.length ? round3(all.reduce((a, b) => a + b, 0) / all.length) : 0;
-			const conf = state.responses.map((r) => (r.confidence - 1) / 4);
-			const scoreByResp = state.responses.map((r) => Number(grades.get(r.id)?.score ?? 0));
-			const gap = scoreByResp.length ? round3(conf.reduce((acc, c, i) => acc + (c - scoreByResp[i]), 0) / scoreByResp.length) : 0;
+			const { areaRows, overall, gap, resultRel } = await bb.mutate(() => {
+				const test = bb.readJson<{ items: Array<{ id: string; area: string; level: string }> }>(state.testFile as string, { items: [] });
+				const grades = new Map(params.grades.map((g) => [g.id, g]));
+				const levelOf = new Map(params.by_area.map((a) => [a.area, a]));
+				// 规则在代码：按领域聚合得分；层级判断由模型给出，分数由工具算
+				const byArea = new Map<string, number[]>();
+				for (const it of test.items) byArea.set(it.area, [...(byArea.get(it.area) ?? []), Number(grades.get(it.id)?.score ?? 0)]);
+				const areaRows = [...byArea].map(([area, scores]) => ({
+					area,
+					score: round3(scores.reduce((a, b) => a + b, 0) / scores.length),
+					items: scores.length,
+					level_reached: levelOf.get(area)?.level_reached ?? "none",
+					note: levelOf.get(area)?.note,
+				}));
+				const all = test.items.map((it) => Number(grades.get(it.id)?.score ?? 0));
+				const overall = all.length ? round3(all.reduce((a, b) => a + b, 0) / all.length) : 0;
+				const conf = state.responses.map((r) => (r.confidence - 1) / 4);
+				const scoreByResp = state.responses.map((r) => Number(grades.get(r.id)?.score ?? 0));
+				const gap = scoreByResp.length ? round3(conf.reduce((acc, c, i) => acc + (c - scoreByResp[i]), 0) / scoreByResp.length) : 0;
 
-			const resultRel = `placement/${stamp()}-result.json`;
-			bb.writeJson(resultRel, { date: today(), test: state.testFile, responses: state.responses, grades: params.grades, by_area: areaRows, overall, calibration_gap: gap, strengths: params.strengths, gaps: params.gaps, recommendations: params.recommendations });
-			bb.renamePending(state.testFile);
-			bb.saveDomain({ placement: { date: today(), overall, by_area: areaRows, strengths: params.strengths, gaps: params.gaps, recommendations: params.recommendations, result_file: resultRel } });
+				const resultRel = `placement/${stamp()}-result.json`;
+				bb.writeJson(resultRel, { date: today(), test: state.testFile, responses: state.responses, grades: params.grades, by_area: areaRows, overall, calibration_gap: gap, strengths: params.strengths, gaps: params.gaps, recommendations: params.recommendations });
+				bb.renamePending(state.testFile as string);
+				bb.saveDomain({ placement: { date: today(), overall, by_area: areaRows, strengths: params.strengths, gaps: params.gaps, recommendations: params.recommendations, result_file: resultRel } });
+				return { areaRows, overall, gap, resultRel };
+			});
 
 			state.testFile = undefined;
 			state.responses = [];
@@ -370,7 +404,7 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
 				for (const p of c.prereqs) if (!ids.has(p)) throw new Error(`概念 ${c.id} 的前置 ${p} 不在提案中`);
 			}
 			if (hasCycle(params.concepts)) throw new Error("前置关系存在环，请修正后重新提交");
-			const path = bb.writeProposal("plan", params);
+			const path = await bb.mutate(() => bb.writeProposal("plan", params));
 			const summary = bb.summarizeProposal(params as { concepts: Concept[]; units: Unit[]; notes: string });
 			const asked = await askNext(ctx, "规划提案已提交，接下来？", [
 				{ label: "送独立评审（另开评审会话）", route: "critique" },
@@ -415,7 +449,7 @@ ${summary}
 			const data = { proposal: file, ...params, counts: { blocking, major, minor }, recorded_at: new Date().toISOString() };
 			const lines = [`# 提案评审：${file}`, ``, `结论：${params.verdict}（blocking ${blocking}，major ${major}，minor ${minor}）`, ``, params.summary, ``];
 			for (const f of params.findings) lines.push(`- [${f.severity}] ${f.target}：${f.issue}（建议：${f.suggestion}）`);
-			const out = bb.writeReview(file, data, lines.join("\n") + "\n");
+			const out = await bb.mutate(() => bb.writeReview(file, data, lines.join("\n") + "\n"));
 			// 修改路由按提案类型定：plan → 规划者按意见修改；sources / curate → 馆员重新提交
 			const base = file.split(/[\\/]/).pop() ?? "";
 			const reviseRoute = base.startsWith("plan-") ? "plan revise" : base.startsWith("curate-") ? "curate" : "sources";
@@ -486,7 +520,7 @@ ${summary}
 		executionMode: "sequential",
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			requireRole(deps.state(), "librarian");
-			const path = bb.writeProposal("sources", params);
+			const path = await bb.mutate(() => bb.writeProposal("sources", params));
 			const summary = bb.summarizeProposal(params as { sources: Source[] });
 			const asked = await askNext(ctx, "资料提案已提交，接下来？", [
 				{ label: "送独立评审（另开评审会话）", route: "critique" },
@@ -539,7 +573,7 @@ ${summary}
 		async execute(_id, params, _signal, _onUpdate, ctx) {
 			requireRole(deps.state(), "librarian");
 			const proposal = { kind: "curate" as const, ...params };
-			const path = bb.writeProposal("curate", proposal);
+			const path = await bb.mutate(() => bb.writeProposal("curate", proposal));
 			const summary = bb.summarizeProposal(proposal);
 			const asked = await askNext(ctx, "整理提案已提交，接下来？", [{ label: "审阅并接受（弹出摘要确认）", route: "accept" }]);
 			return text(`整理提案已写入 ${path}。
@@ -676,59 +710,66 @@ ${summary}
 			const state = deps.state();
 			requireRole(state, "tutor");
 			const unitId = state.unit ?? bb.nextUnit()?.id ?? "unknown";
-			const idx = bb.conceptIndex();
-			const concepts = [...idx.values()];
 
-			// 1. 证据落盘（附上学习者自己输入的作答与信心，那部分来自 bb_collect_answers，不来自模型）
-			const file = `${today()}-${unitId}-${stamp()}.json`;
-			bb.writeJson(`evidence/${file}`, {
-				...params,
-				unit: unitId,
-				prequestions: state.prequestions,
-				learner_answers: state.answers,
-				mode_at_end: state.mode,
-				recorded_at: new Date().toISOString(),
-				source: "tutor",
-			});
+			// 1–3 是纯文件变更，整体持锁；4（单元完成确认）中间有对话框，锁分两段
+			const { file, learned } = await bb.mutate(() => {
+				const idx = bb.conceptIndex();
+				const concepts = [...idx.values()];
 
-			// 2. 掌握度：导师上限 learned
-			const learned: string[] = [];
-			for (const cid of params.concepts_touched) {
-				const c = idx.get(cid);
-				if (c) {
-					promote(c, "touched", "tutor");
-					c.evidence ??= [];
-					c.evidence.push(file);
+				// 1. 证据落盘（附上学习者自己输入的作答与信心，那部分来自 bb_collect_answers，不来自模型）
+				const file = `${today()}-${unitId}-${stamp()}.json`;
+				bb.writeJson(`evidence/${file}`, {
+					...params,
+					unit: unitId,
+					prequestions: state.prequestions,
+					learner_answers: state.answers,
+					mode_at_end: state.mode,
+					recorded_at: new Date().toISOString(),
+					source: "tutor",
+				});
+
+				// 2. 掌握度：导师上限 learned
+				const learned: string[] = [];
+				for (const cid of params.concepts_touched) {
+					const c = idx.get(cid);
+					if (c) {
+						promote(c, "touched", "tutor");
+						c.evidence ??= [];
+						c.evidence.push(file);
+					}
 				}
-			}
-			for (const cid of params.concepts_learned) {
-				const c = idx.get(cid);
-				if (c && promote(c, "learned", "tutor")) learned.push(cid);
-			}
-			bb.saveConcepts(concepts);
+				for (const cid of params.concepts_learned) {
+					const c = idx.get(cid);
+					if (c && promote(c, "learned", "tutor")) learned.push(cid);
+				}
+				bb.saveConcepts(concepts);
 
-			// 3. 错误日志与事件
-			for (const m of params.misconceptions) bb.logError(m.concept, "misconception", m.description, `tutor:${file}`);
-			for (const g of params.gaps) bb.logError(g.concept, "gap", g.description, `tutor:${file}`);
-			if (params.resource_request) bb.emit("resource_request", { unit: unitId, note: params.resource_request });
+				// 3. 错误日志与事件
+				for (const m of params.misconceptions) bb.logError(m.concept, "misconception", m.description, `tutor:${file}`);
+				for (const g of params.gaps) bb.logError(g.concept, "gap", g.description, `tutor:${file}`);
+				if (params.resource_request) bb.emit("resource_request", { unit: unitId, note: params.resource_request });
+				return { file, learned };
+			});
 
 			let unitNote = "";
 			if (params.exit_criteria_met) {
 				const ok = ctx.hasUI ? await ctx.ui.confirm("单元完成？", `陪读老师认为单元 ${unitId} 的退出标准已满足。标为完成并发出 unit_complete 事件？`) : false;
 				if (ok) {
-					const units = bb.units();
-					const u = units.find((x) => x.id === unitId);
-					if (u) {
-						u.status = "done";
-						bb.saveUnits(units);
-					}
-					bb.emit("unit_complete", { unit: unitId });
+					await bb.mutate(() => {
+						const units = bb.units();
+						const u = units.find((x) => x.id === unitId);
+						if (u) {
+							u.status = "done";
+							bb.saveUnits(units);
+						}
+						bb.emit("unit_complete", { unit: unitId });
+					});
 					unitNote = "单元已标为完成。";
 				} else {
 					unitNote = ctx.hasUI ? "学习者未确认完成，单元保持 active。" : "非交互模式，未自动标记完成。";
 				}
 			}
-			bb.maybeErrorThreshold();
+			await bb.mutate(() => bb.maybeErrorThreshold());
 
 			state.answers = [];
 			deps.persist();
@@ -772,17 +813,19 @@ ${summary}
 			const artifact = state.artifact ?? "unknown";
 			const base = artifact.split(/[\\/]/).pop()?.replace(/\.[^.]+$/, "") ?? "artifact";
 			const rel = `artifacts/reviews/${base}-${stamp()}.md`;
-			const lines = [`# 评审：${artifact}`, `结论：${params.verdict}`, ""];
-			for (const f of params.findings) {
-				lines.push(`- [${f.severity}/${f.kind}] ${f.location}：${f.issue}（${f.why}）概念：${f.concept ?? "无"}`);
-				if ((f.kind === "misconception" || f.kind === "gap") && f.concept) {
-					bb.logError(f.concept, f.kind, `${artifact} ${f.location}: ${f.issue}`, `reviewer:${rel}`);
+			await bb.mutate(() => {
+				const lines = [`# 评审：${artifact}`, `结论：${params.verdict}`, ""];
+				for (const f of params.findings) {
+					lines.push(`- [${f.severity}/${f.kind}] ${f.location}：${f.issue}（${f.why}）概念：${f.concept ?? "无"}`);
+					if ((f.kind === "misconception" || f.kind === "gap") && f.concept) {
+						bb.logError(f.concept, f.kind, `${artifact} ${f.location}: ${f.issue}`, `reviewer:${rel}`);
+					}
 				}
-			}
-			if (params.unresolved.length) lines.push("", "待学习者说明：", ...params.unresolved.map((u) => `- ${u}`));
-			bb.writeJson(rel.replace(/\.md$/, ".json"), { artifact, ...params, recorded_at: new Date().toISOString() });
-			bb.writeText(rel, lines.join("\n") + "\n"); // Markdown 版本供人阅读
-			bb.maybeErrorThreshold();
+				if (params.unresolved.length) lines.push("", "待学习者说明：", ...params.unresolved.map((u) => `- ${u}`));
+				bb.writeJson(rel.replace(/\.md$/, ".json"), { artifact, ...params, recorded_at: new Date().toISOString() });
+				bb.writeText(rel, lines.join("\n") + "\n"); // Markdown 版本供人阅读
+				bb.maybeErrorThreshold();
+			});
 			return text(`评审已写入 ${rel}（结论 ${params.verdict}，${params.findings.length} 条发现）。`);
 		},
 	});
@@ -810,8 +853,10 @@ ${summary}
 			const state = deps.state();
 			requireRole(state, "assessor");
 			const rel = `assessments/pending-${stamp()}.json`;
-			bb.writeJson(rel, { date: today(), items: params.items, due_concepts: bb.dueConcepts().map((c) => c.id) });
-			bb.markHandled(["unit_complete", "errors_threshold"]);
+			await bb.mutate(() => {
+				bb.writeJson(rel, { date: today(), items: params.items, due_concepts: bb.dueConcepts().map((c) => c.id) });
+				bb.markHandled(["unit_complete", "errors_threshold"]);
+			});
 			const asked = await askNext(ctx, `测试已就绪（${params.items.length} 题），现在闭卷作答？`, [{ label: "现在闭卷作答", route: "take" }]);
 			return text(`测试已写入 ${rel}（${params.items.length} 题）。不要在对话中透露参考答案。${asked}`);
 		},
@@ -842,67 +887,71 @@ ${summary}
 			if (!state.testFile || !state.responses.length) {
 				throw new Error("尚未收集学习者作答：请学习者先闭卷作答（bb_route_ask 提议 take），再进行批改。");
 			}
-			const test = bb.readJson<{ items: Array<{ id: string; concept: string }> }>(state.testFile, { items: [] });
-			const grades = new Map(params.grades.map((g) => [g.id, g]));
+			const { passed, partial, failed, resolved, result, resultRel, outlineRel } = await bb.mutate(() => {
+				const testFile = state.testFile as string;
+				const test = bb.readJson<{ items: Array<{ id: string; concept: string }> }>(testFile, { items: [] });
+				const grades = new Map(params.grades.map((g) => [g.id, g]));
 
-			// 规则在代码：按概念聚合得分，决定通过 / 部分 / 未通过
-			const idx = bb.conceptIndex();
-			const byConcept = new Map<string, number[]>();
-			for (const it of test.items) {
-				const s = Number(grades.get(it.id)?.score ?? 0);
-				byConcept.set(it.concept, [...(byConcept.get(it.concept) ?? []), s]);
-			}
-			const passed: string[] = [];
-			const partial: string[] = [];
-			const failed: string[] = [];
-			for (const [cid, scores] of byConcept) {
-				const c: Concept | undefined = idx.get(cid);
-				if (!c) continue;
-				const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
-				if (mean >= PASS) {
-					onPass(c);
-					passed.push(cid);
-				} else if (mean < FAIL) {
-					onFail(c);
-					failed.push(cid);
-				} else {
-					onPartial(c);
-					partial.push(cid);
+				// 规则在代码：按概念聚合得分，决定通过 / 部分 / 未通过
+				const idx = bb.conceptIndex();
+				const byConcept = new Map<string, number[]>();
+				for (const it of test.items) {
+					const s = Number(grades.get(it.id)?.score ?? 0);
+					byConcept.set(it.concept, [...(byConcept.get(it.concept) ?? []), s]);
 				}
-			}
-			bb.saveConcepts([...idx.values()]);
-			for (const g of params.grades) {
-				if (g.misconception) {
-					const it = test.items.find((i) => i.id === g.id);
-					bb.logError(it?.concept ?? null, "misconception", g.misconception, `assessor:${state.testFile}`);
+				const passed: string[] = [];
+				const partial: string[] = [];
+				const failed: string[] = [];
+				for (const [cid, scores] of byConcept) {
+					const c: Concept | undefined = idx.get(cid);
+					if (!c) continue;
+					const mean = scores.reduce((a, b) => a + b, 0) / scores.length;
+					if (mean >= PASS) {
+						onPass(c);
+						passed.push(cid);
+					} else if (mean < FAIL) {
+						onFail(c);
+						failed.push(cid);
+					} else {
+						onPartial(c);
+						partial.push(cid);
+					}
 				}
-			}
-			const resolved = bb.resolveErrors(new Set(passed), `assessor:${state.testFile}`);
+				bb.saveConcepts([...idx.values()]);
+				for (const g of params.grades) {
+					if (g.misconception) {
+						const it = test.items.find((i) => i.id === g.id);
+						bb.logError(it?.concept ?? null, "misconception", g.misconception, `assessor:${testFile}`);
+					}
+				}
+				const resolved = bb.resolveErrors(new Set(passed), `assessor:${testFile}`);
 
-			// 校准：信心归一到 0–1 后与得分之差；正值为过度自信
-			const conf = state.responses.map((r) => (r.confidence - 1) / 4);
-			const score = state.responses.map((r) => Number(grades.get(r.id)?.score ?? 0));
-			const meanScore = score.length ? score.reduce((a, b) => a + b, 0) / score.length : 0;
-			const gap = score.length ? conf.reduce((acc, c, i) => acc + (c - score[i]), 0) / score.length : 0;
-			const result = {
-				date: today(),
-				test: state.testFile,
-				responses: state.responses,
-				grades: params.grades,
-				mean_score: round3(meanScore),
-				calibration_gap: round3(gap),
-				passed_concepts: passed,
-				partial_concepts: partial,
-				failed_concepts: failed,
-			};
-			const resultRel = `assessments/${stamp()}-result.json`;
-			bb.writeJson(resultRel, result);
-			bb.appendJsonl("assessments/calibration.jsonl", { date: today(), mean_score: result.mean_score, gap: result.calibration_gap });
-			bb.renamePending(state.testFile);
+				// 校准：信心归一到 0–1 后与得分之差；正值为过度自信
+				const conf = state.responses.map((r) => (r.confidence - 1) / 4);
+				const score = state.responses.map((r) => Number(grades.get(r.id)?.score ?? 0));
+				const meanScore = score.length ? score.reduce((a, b) => a + b, 0) / score.length : 0;
+				const gap = score.length ? conf.reduce((acc, c, i) => acc + (c - score[i]), 0) / score.length : 0;
+				const result = {
+					date: today(),
+					test: testFile,
+					responses: state.responses,
+					grades: params.grades,
+					mean_score: round3(meanScore),
+					calibration_gap: round3(gap),
+					passed_concepts: passed,
+					partial_concepts: partial,
+					failed_concepts: failed,
+				};
+				const resultRel = `assessments/${stamp()}-result.json`;
+				bb.writeJson(resultRel, result);
+				bb.appendJsonl("assessments/calibration.jsonl", { date: today(), mean_score: result.mean_score, gap: result.calibration_gap });
+				bb.renamePending(testFile);
 
-			const outlineRel = `reflections/${today()}-outline.md`;
-			bb.writeText(outlineRel, `# 复盘提纲 ${today()}\n\n${params.outline}\n\n---\n\n# 我的复盘（学习者亲笔）\n\n`);
-			if (params.structural_gap) bb.emit("replan_request", { note: params.gap_note });
+				const outlineRel = `reflections/${today()}-outline.md`;
+				bb.writeText(outlineRel, `# 复盘提纲 ${today()}\n\n${params.outline}\n\n---\n\n# 我的复盘（学习者亲笔）\n\n`);
+				if (params.structural_gap) bb.emit("replan_request", { note: params.gap_note });
+				return { passed, partial, failed, resolved, result, resultRel, outlineRel };
+			});
 
 			state.testFile = undefined;
 			state.responses = [];

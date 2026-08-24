@@ -96,9 +96,11 @@ schtasks /Create /SC WEEKLY /D MON,THU /ST 20:00 /TN "pi-learning assess" /TR "c
 
 `assess-cron.mjs` 依次尝试环境变量 `PI_BIN`、项目内安装的 pi（见下节）、PATH 上的 `pi`；`--force` 跳过判定直接出题，`--max <n>` 设题数上限。
 
-## Obsidian 插件（obsidian-plugin/）
+## Obsidian 插件（obsidian-plugin/）：hub 花名册
 
-把同一套 Agent 嵌进 Obsidian 侧边栏：插件以子进程方式启动 `pi --mode rpc`（工作目录就是本项目），扩展的对话框（确认、选择、单行输入、多行编辑器）经 pi 的扩展 UI 子协议变成 Obsidian 的模态框，`/learn` 与馆藏概览的输出以卡片显示，bb_* 工具调用默认展开作为回执。学习者在 Obsidian 里对前台与角色说话；命令条只保留「概览」（`/learn`），其余推进都发生在对话与模态框里。黑板文件仍在本项目目录（可作为第二个 vault 打开，或按需镜像到主库）。渲染用 Obsidian 自带的 MarkdownRenderer（与笔记同一套主题、数学、代码高亮），流式输出按块增量：已完成的段落只渲染一次，只重绘末尾未完成的块并临时闭合未结束的代码围栏，工具与思考块就地更新，折叠状态不丢。
+把八个角色作为常驻后端实例嵌进 Obsidian 侧边栏（[HUB-PLAN.md](HUB-PLAN.md) 的 P1 形态）：插件为每个角色维持一个 `pi --mode rpc` 子进程（`LEARN_ROLE` 固定角色、懒启动、崩溃后可重启并各自续接上次会话），页签切换即独立对话。输入 `@角色`（如 `@资料管理员`、`@提案评审员`、`@复盘老师`）唤醒并路由，一条消息可点名多个角色依次触发；无 `@` 的消息发给当前页签的实例。回合串行执行——同一时刻只有一个实例在生成，扩展内的跨进程黑板锁兜底并发写；Agent 回复里的 `@` 只是文本，路由权只在学习者手里。常驻实例模式下角色固定：跨角色的下一步不再切会话，工具会提示「请 @对应角色」。
+
+扩展的对话框（确认、选择、单行输入、多行编辑器）经 pi 的扩展 UI 子协议变成 Obsidian 的模态框并标注来源角色（如「【资料管理员】接受提案？」），`/learn` 与馆藏概览的输出以卡片显示，bb_* 工具调用默认展开作为回执。黑板文件仍在本项目目录（可作为第二个 vault 打开，或按需镜像到主库）。渲染用 Obsidian 自带的 MarkdownRenderer（与笔记同一套主题、数学、代码高亮），流式输出按块增量：已完成的段落只渲染一次，只重绘末尾未完成的块并临时闭合未结束的代码围栏，工具与思考块就地更新，折叠状态不丢。
 
 ```
 cd obsidian-plugin
@@ -108,7 +110,7 @@ node scripts/install-to-vault.mjs <vault 路径>   # 复制到 <vault>/.obsidian
 npm test                                        # 对真实 pi（RPC 模式）测试客户端，不调用模型
 ```
 
-在 Obsidian「设置 → 第三方插件」启用 Pi Learning，再到插件设置里填「学习项目目录」（本项目的绝对路径）；模型凭据由 pi 自己管理（终端里 `pi` 后 `/login`，或用户级环境变量），插件不保存任何密钥。侧边栏顶部显示角色、模型与会话名。
+在 Obsidian「设置 → 第三方插件」启用 Pi Learning，再到插件设置里填「学习项目目录」（本项目的绝对路径）；模型凭据由 pi 自己管理（终端里 `pi` 后 `/login`，或用户级环境变量），插件不保存任何密钥。顶栏显示当前实例的角色、模型、会话与串行队列长度；各实例的会话文件记在插件数据里，重启 Obsidian 后各自续接。
 
 ## 开发与验证
 
@@ -131,8 +133,9 @@ IMPLEMENTATION-PLAN.md            设计与实现方案
   index.ts                        入口：会话生命周期（默认进入前台）、系统提示与上下文注入、工具护栏
   state.ts                        会话级状态、持久化、会话切换交接
   roles.ts                        八个角色的提示、工具白名单、上下文装配、开场语
-  route.ts                        路由层：确定性的下一步建议（nextSteps）与路由串渲染（renderRoute）
+  route.ts                        路由层：确定性的下一步建议（nextSteps）、路由串渲染与 hub 模式判定
   actions.ts                      学习者侧对话框流程：闭卷作答、核验、收集入库、各类亲笔编辑器
+  lock.ts                         黑板跨进程锁（hub 多实例与 cron 并发写的兜底）
   exemplars/plan-exemplar.md      规划范例与反例（首次规划与修改时注入规划者、评审员上下文）
   tools.ts                        bb_* 工具（模型改写黑板的唯一入口；路由询问与尾部询问在此收口）
   blackboard.ts                   黑板 I/O、状态机、复习调度、事件、错误日志
@@ -144,5 +147,5 @@ IMPLEMENTATION-PLAN.md            设计与实现方案
 blackboard/                       黑板（含 library/：本地资料副本，不进版本库）
 scripts/                          定时出题脚本（sh 与 node 两版）
 tests/                            伪造 ExtensionAPI 的全流程测试、加载测试、脚本测试
-obsidian-plugin/                  Obsidian 插件：RPC 客户端、侧边栏视图、模态框、命令条
+obsidian-plugin/                  Obsidian 插件（hub）：RPC 客户端、实例管理器、花名册页签、寻址解析、模态框
 ```

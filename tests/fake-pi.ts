@@ -127,17 +127,25 @@ export interface HarnessOptions {
 }
 
 /** 构造扩展上下文；工具与命令共用同一个对象（ExtensionCommandContext 是其超集） */
-type CtxExtras = { notices: Array<[string, string]>; confirms: Array<[string, string]>; statuses: Map<string, string | undefined> };
+type CtxExtras = {
+	notices: Array<[string, string]>;
+	confirms: Array<[string, string]>;
+	/** 每次 select 弹框的标题与选项，供断言选项过滤 */
+	selects: Array<[string, string[]]>;
+	statuses: Map<string, string | undefined>;
+};
 export function makeCtx(pi: FakePi, opts: HarnessOptions): ExtensionCommandContext & CtxExtras {
 	const ui = opts.ui ?? {};
 	const notices: Array<[string, string]> = [];
 	const confirms: Array<[string, string]> = [];
+	const selects: Array<[string, string[]]> = [];
 	const statuses = new Map<string, string | undefined>();
 	const ctx = {
 		cwd: opts.cwd,
 		hasUI: opts.hasUI ?? true,
 		notices,
 		confirms,
+		selects,
 		statuses,
 		ui: {
 			notify: (msg: string, level = "info") => notices.push([level, msg]),
@@ -149,7 +157,10 @@ export function makeCtx(pi: FakePi, opts: HarnessOptions): ExtensionCommandConte
 				const v = (ui.editor ?? []).shift();
 				return typeof v === "function" ? v(prefill) : v;
 			},
-			select: async () => (ui.select ?? []).shift(),
+			select: async (title: string, options: string[]) => {
+				selects.push([title, options]);
+				return (ui.select ?? []).shift();
+			},
 			input: async () => (ui.input ?? []).shift(),
 			setStatus: (key: string, text: string | undefined) => statuses.set(key, text),
 			setWorkingMessage: () => {},

@@ -1,8 +1,11 @@
 /**
- * controller.ts —— 插件内唯一的 pi 会话控制器：管理子进程生命周期、维护状态（模型、会话、角色状态栏），
- * 把 RPC 事件分发给当前打开的视图，把扩展 UI 请求渲染成 Obsidian 模态框。
+ * controller.ts —— 单个角色实例的 pi 会话控制器：管理子进程生命周期（LEARN_ROLE 固定角色、
+ * LEARN_HUB 常驻实例模式）、维护状态（模型、会话、角色状态栏）、跨插件重启续接本实例的会话，
+ * 把 RPC 事件分发给视图，把扩展 UI 请求渲染成带角色标注的 Obsidian 模态框。
+ * hub 花名册的每个角色各持有一个本类实例（见 instances.ts）。
  */
 import { type App, Notice } from "obsidian";
+import { existsSync } from "node:fs";
 import { resolve } from "node:path";
 import { locatePi } from "./locate.ts";
 import { describeSession, listSessions } from "./sessions.ts";
@@ -20,6 +23,17 @@ export interface ControllerSurface {
 	setEditorText(text: string): void;
 }
 
+export interface InstanceSpec {
+	/** 扩展的角色名；作为子进程的 LEARN_ROLE */
+	role: string;
+	/** 页签与模态框的角色标注 */
+	label: string;
+	/** 本实例上次的会话文件（跨插件重启续接）；返回空则新开会话 */
+	savedSession?: () => string | undefined;
+	/** 会话文件变化时回写（由 instances.ts 持久化到插件数据） */
+	onSessionFile?: (file: string) => void;
+}
+
 export class LearningController {
 	client: PiRpcClient | null = null;
 	state: RpcState | null = null;
@@ -35,6 +49,7 @@ export class LearningController {
 	constructor(
 		private app: App,
 		private settings: () => PiLearningSettings,
+		readonly spec: InstanceSpec,
 	) {}
 
 	attach(surface: ControllerSurface): void {
@@ -67,13 +82,15 @@ export class LearningController {
 		const launch = locatePi(s.piPath, s.nodePath || "node", cwd);
 		if (!launch) throw new Error("找不到 pi：请全局安装 @earendil-works/pi-coding-agent，或在设置里填写 pi 的 dist/cli.js 路径。");
 		this.launchSource = launch.source;
-		const args = ["-a", ...(s.resumeLast ? ["-c"] : []), ...(s.extraArgs ? splitArgs(s.extraArgs) : [])];
+		const args = ["-a", ...(s.extraArgs ? splitArgs(s.extraArgs) : [])];
 		if (s.model?.trim()) args.push("--model", s.model.trim());
 		const client = new PiRpcClient({
 			command: launch.command,
 			commandArgs: launch.args,
 			cwd,
 			args,
+			// 常驻实例：角色固定在子进程环境上，扩展在 session_start 里应用并启用 hub 护栏
+			env: { LEARN_ROLE: this.spec.role, LEARN_HUB: "1" },
 			onEvent: (e) => this.handleEvent(e),
 			onUiRequest: (r) => this.handleUiRequest(r),
 			onExit: (info) => {
@@ -86,7 +103,24 @@ export class LearningController {
 		});
 		this.client = client;
 		await client.start();
+		// 续接本实例上次的会话（每实例各续各的；-c 会让全部实例抢同一个会话，不能用）
+		const saved = this.settings().resumeLast ? this.spec.savedSession?.() : undefined;
+		if (saved && existsSync(saved)) {
+			try {
+				await client.switchSession(saved);
+			} catch {
+				/* 会话文件不可用则保持新会话 */
+			}
+		}
 		await this.refreshState(true);
+		if (!this.state?.sessionName) {
+			try {
+				await client.setSessionName(`hub ${this.spec.label}`);
+				await this.refreshState();
+			} catch {
+				/* 命名失败不影响使用 */
+			}
+		}
 	}
 
 	async stop(): Promise<void> {
@@ -120,6 +154,26 @@ export class LearningController {
 	async abort(): Promise<void> {
 		await this.requireClient().abort();
 		await this.refreshState();
+	}
+
+	/**
+	 * 等本实例的当前回合结束（含对话框等待）。hub 的回合串行队列用它保证
+	 * 同一时刻只有一个实例在生成，也是黑板并发写的第一道防线。
+	 */
+	async waitIdle(timeoutMs = 15 * 60_000): Promise<void> {
+		const deadline = Date.now() + timeoutMs;
+		while (Date.now() < deadline) {
+			const client = this.client;
+			if (!client?.running) return;
+			try {
+				const st = await client.getState();
+				this.state = st;
+				if (!st.isStreaming && !(st.pendingMessageCount ?? 0)) return;
+			} catch {
+				return; // 实例中途退出：不阻塞队列
+			}
+			await new Promise((r) => setTimeout(r, 400));
+		}
 	}
 
 	async newSession(): Promise<void> {
@@ -210,6 +264,8 @@ export class LearningController {
 			const prev = this.state;
 			const next = await client.getState();
 			this.state = next;
+			// 会话文件回写：插件重启后本实例续接同一会话
+			if (next.sessionFile && next.sessionFile !== prev?.sessionFile) this.spec.onSessionFile?.(next.sessionFile);
 			const replaced = forceReload || (prev?.sessionFile ?? null) !== (next.sessionFile ?? null) || (prev?.sessionId ?? null) !== (next.sessionId ?? null);
 			if (replaced) {
 				// 新会话的状态栏由新扩展实例重新 setStatus；先清掉旧的
@@ -237,10 +293,12 @@ export class LearningController {
 	// ---------- 扩展 UI 子协议 ----------
 
 	private async handleUiRequest(req: UiRequest): Promise<UiResponse | undefined> {
+		// 多实例并存：对话框与通知一律标注来源角色，学习者才知道在回应谁
+		const tag = `【${this.spec.label}】`;
 		switch (req.method) {
 			case "notify": {
 				const text = req.message ?? "";
-				new Notice(text, req.notifyType === "error" ? 10000 : 6000);
+				new Notice(`${tag}${text}`, req.notifyType === "error" ? 10000 : 6000);
 				this.surface?.onSystem(text, req.notifyType ?? "info");
 				return undefined;
 			}
@@ -266,19 +324,19 @@ export class LearningController {
 				this.surface?.setEditorText(req.text ?? "");
 				return undefined;
 			case "confirm": {
-				const ok = await confirmModal(this.app, req.title ?? "确认", req.message ?? "");
+				const ok = await confirmModal(this.app, `${tag}${req.title ?? "确认"}`, req.message ?? "");
 				return { confirmed: ok };
 			}
 			case "select": {
-				const v = await selectModal(this.app, req.title ?? "请选择", req.options ?? []);
+				const v = await selectModal(this.app, `${tag}${req.title ?? "请选择"}`, req.options ?? []);
 				return v === undefined ? { cancelled: true } : { value: v };
 			}
 			case "input": {
-				const v = await inputModal(this.app, req.title ?? "请输入", req.placeholder ?? "");
+				const v = await inputModal(this.app, `${tag}${req.title ?? "请输入"}`, req.placeholder ?? "");
 				return v === undefined ? { cancelled: true } : { value: v };
 			}
 			case "editor": {
-				const v = await editorModal(this.app, req.title ?? "编辑", req.prefill ?? "");
+				const v = await editorModal(this.app, `${tag}${req.title ?? "编辑"}`, req.prefill ?? "");
 				return v === undefined ? { cancelled: true } : { value: v };
 			}
 			default:

@@ -16,10 +16,12 @@ export interface PiLearningSettings {
 	model: string;
 	/** 其他追加参数，如 --thinking high */
 	extraArgs: string;
-	/** 打开视图时自动启动 pi */
+	/** 打开视图时自动启动前台实例 */
 	autoStart: boolean;
-	/** 启动 pi 时续上本项目最近一次会话（--continue）；关闭则每次新开会话 */
+	/** 实例启动时续接它自己上次的会话；关闭则每次新开会话 */
 	resumeLast: boolean;
+	/** 各角色实例上次的会话文件（由 InstanceManager 回写；跨插件重启续接） */
+	roleSessions: Record<string, string>;
 }
 
 export const DEFAULT_SETTINGS: PiLearningSettings = {
@@ -30,6 +32,7 @@ export const DEFAULT_SETTINGS: PiLearningSettings = {
 	extraArgs: "",
 	autoStart: true,
 	resumeLast: true,
+	roleSessions: {},
 };
 
 export class PiLearningSettingTab extends PluginSettingTab {
@@ -87,7 +90,11 @@ export class PiLearningSettingTab extends PluginSettingTab {
 			)
 			.addButton((b) =>
 				b.setButtonText("从列表选择").onClick(() => {
-					void this.plugin.controller.pickModel().then(() => this.display()).catch((e: Error) => new Notice(e.message));
+					void this.plugin.manager
+						.get(this.plugin.manager.activeRole)
+						.pickModel()
+						.then(() => this.display())
+						.catch((e: Error) => new Notice(e.message));
 				}),
 			);
 		new Setting(containerEl).setName("额外参数").setDesc("追加给 pi 的命令行参数，例如 --thinking high。").addText((t) =>
@@ -96,13 +103,13 @@ export class PiLearningSettingTab extends PluginSettingTab {
 				save();
 			}),
 		);
-		new Setting(containerEl).setName("启动时续上上次会话").setDesc("pi 启动时恢复本项目最近一次会话（--continue）；关闭则每次都是新会话。随时可用顶栏的「历史会话」切换。").addToggle((t) =>
+		new Setting(containerEl).setName("启动时续上上次会话").setDesc("每个角色实例启动时续接它自己上次的会话；关闭则每次都是新会话。随时可用顶栏的「历史会话」切换。").addToggle((t) =>
 			t.setValue(s.resumeLast).onChange((v) => {
 				s.resumeLast = v;
 				save();
 			}),
 		);
-		new Setting(containerEl).setName("打开视图时自动启动 pi").addToggle((t) =>
+		new Setting(containerEl).setName("打开视图时自动启动前台实例").addToggle((t) =>
 			t.setValue(s.autoStart).onChange((v) => {
 				s.autoStart = v;
 				save();

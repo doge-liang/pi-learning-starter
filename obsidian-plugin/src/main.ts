@@ -1,47 +1,57 @@
 /**
- * main.ts —— 插件入口：注册侧边栏视图、命令面板条目、设置页；持有唯一的 LearningController。
+ * main.ts —— 插件入口：注册侧边栏视图、命令面板条目、设置页；持有唯一的 InstanceManager
+ * （hub 花名册：每个角色一个常驻 pi 实例）。
  */
 import { existsSync } from "node:fs";
 import { join } from "node:path";
 import { FileSystemAdapter, Notice, Plugin, type WorkspaceLeaf } from "obsidian";
-import { LearningController } from "./controller.ts";
+import { InstanceManager } from "./instances.ts";
 import { DEFAULT_SETTINGS, type PiLearningSettings, PiLearningSettingTab } from "./settings.ts";
 import { LearningView, VIEW_TYPE } from "./view.ts";
 
 export default class PiLearningPlugin extends Plugin {
-	settings: PiLearningSettings = { ...DEFAULT_SETTINGS };
-	controller!: LearningController;
+	settings: PiLearningSettings = { ...DEFAULT_SETTINGS, roleSessions: {} };
+	manager!: InstanceManager;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
-		this.controller = new LearningController(this.app, () => this.settings);
-		// 面板里切换的模型写回设置，下次启动 pi 时作为 --model 沿用
-		this.controller.onModelChosen = (model) => {
+		this.manager = new InstanceManager(this.app, () => this.settings, () => void this.saveSettings());
+		// 面板里切换的模型写回设置，下次启动实例时作为 --model 沿用
+		this.manager.onModelChosen = (model) => {
 			this.settings.model = model;
 			void this.saveSettings();
 		};
 
-		this.registerView(VIEW_TYPE, (leaf: WorkspaceLeaf) => new LearningView(leaf, this.controller, () => this.settings.autoStart));
+		this.registerView(VIEW_TYPE, (leaf: WorkspaceLeaf) => new LearningView(leaf, this.manager, () => this.settings.autoStart));
 		this.addRibbonIcon("graduation-cap", "打开 Pi Learning", () => void this.activateView());
 		this.addCommand({ id: "open-view", name: "打开学习面板", callback: () => void this.activateView() });
-		this.addCommand({ id: "restart-pi", name: "重启 pi", callback: () => void this.controller.start().catch((e) => new Notice((e as Error).message)) });
-		this.addCommand({ id: "stop-pi", name: "停止 pi", callback: () => void this.controller.stop() });
-		this.addCommand({ id: "pick-session", name: "切换历史会话", callback: () => void this.activateView().then(() => this.controller.pickSession()).catch((e) => new Notice((e as Error).message)) });
-		// 界面收敛后学习者只有 /learn 一个命令；其余流程对前台说话，由选择框推进
+		this.addCommand({
+			id: "restart-pi",
+			name: "重启当前实例",
+			callback: () => void this.manager.get(this.manager.activeRole).start().catch((e) => new Notice((e as Error).message)),
+		});
+		this.addCommand({ id: "stop-pi", name: "停止全部实例", callback: () => void this.manager.stopAll() });
+		this.addCommand({
+			id: "pick-session",
+			name: "切换当前实例的历史会话",
+			callback: () => void this.activateView().then(() => this.manager.get(this.manager.activeRole).pickSession()).catch((e) => new Notice((e as Error).message)),
+		});
+		// 界面收敛后学习者只有 /learn 一个命令；其余流程用 @角色 对话推进
 		this.addCommand({
 			id: "cmd-learn",
 			name: "黑板概览与下一步（/learn）",
-			callback: () => void this.activateView().then(() => this.controller.send("/learn")).catch((e) => new Notice((e as Error).message)),
+			callback: () => void this.activateView().then(() => this.manager.dispatch("concierge", "/learn")).catch((e) => new Notice((e as Error).message)),
 		});
 		this.addSettingTab(new PiLearningSettingTab(this.app, this));
 	}
 
 	async onunload(): Promise<void> {
-		await this.controller.stop();
+		await this.manager.stopAll();
 	}
 
 	async loadSettings(): Promise<void> {
-		this.settings = { ...DEFAULT_SETTINGS, ...((await this.loadData()) ?? {}) };
+		const loaded = ((await this.loadData()) ?? {}) as Partial<PiLearningSettings>;
+		this.settings = { ...DEFAULT_SETTINGS, ...loaded, roleSessions: { ...(loaded.roleSessions ?? {}) } };
 		// 首次使用：若 vault 根目录本身就是学习项目，直接用它
 		if (!this.settings.projectDir) {
 			const base = this.vaultBasePath();
