@@ -1,4 +1,10 @@
-/* Pi Learning —— 侧边栏视图与模态框样式；颜色一律取 Obsidian 主题变量 */
+/* Pi Learning —— 「教研室圆桌」设计系统。
+ *
+ * 身份色环：八个角色各占一个色相（roster.ts 的 hue，经内联 --pi-role-h 注入），
+ * 饱和度 / 亮度 / 透明度在这里按亮暗主题统一调配——同一份规则两种主题都成立。
+ * 其余颜色一律取 Obsidian 主题变量；动效克制且语义固定：
+ * 呼吸 = 实例运行，脉冲 = 正在生成，淡入上移 = 新消息，滑入下划线 = 活跃页签。
+ */
 
 .pi-learning-view {
 	display: flex;
@@ -6,7 +12,47 @@
 	height: 100%;
 	padding: 0;
 	gap: 6px;
+	/* 身份色的调配参数（亮色主题基准；hue 由元素内联提供） */
+	--pi-role-h: 215;
+	--pi-role-s: 58%;
+	--pi-ink-l: 34%;
+	--pi-wash-a: 0.12;
+	--pi-line-a: 0.5;
 }
+.theme-dark .pi-learning-view {
+	--pi-ink-l: 70%;
+	--pi-wash-a: 0.17;
+	--pi-line-a: 0.6;
+}
+.pi-learning-hidden {
+	display: none !important;
+}
+
+/* ---------- 印章徽章：单字圆章，贯穿页签 / 消息 / 补全 / 花名册 ---------- */
+
+.pi-learning-glyph {
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 1.6em;
+	height: 1.6em;
+	border-radius: 50%;
+	font-size: 0.85em;
+	font-weight: 650;
+	line-height: 1;
+	flex-shrink: 0;
+	user-select: none;
+	color: hsl(var(--pi-role-h) var(--pi-role-s) var(--pi-ink-l));
+	background: hsl(var(--pi-role-h) var(--pi-role-s) 50% / var(--pi-wash-a));
+	box-shadow: inset 0 0 0 1px hsl(var(--pi-role-h) var(--pi-role-s) 50% / 0.32);
+}
+.pi-learning-glyph-group {
+	color: var(--text-accent);
+	background: hsla(var(--interactive-accent-hsl), 0.14);
+	box-shadow: inset 0 0 0 1px hsla(var(--interactive-accent-hsl), 0.35);
+}
+
+/* ---------- 顶栏 ---------- */
 
 .pi-learning-header {
 	display: flex;
@@ -16,11 +62,20 @@
 	padding: 6px 8px 0 8px;
 }
 .pi-learning-status {
+	display: flex;
+	align-items: center;
+	gap: 5px;
 	font-size: var(--font-ui-small);
 	color: var(--text-muted);
 	overflow: hidden;
-	text-overflow: ellipsis;
 	white-space: nowrap;
+}
+.pi-learning-status > span:not(.pi-learning-glyph) {
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+.pi-learning-status-glyph {
+	font-size: 0.78em;
 }
 .pi-learning-status-off {
 	color: var(--text-faint);
@@ -33,9 +88,6 @@
 .pi-learning-icon-btn {
 	padding: 4px;
 }
-.pi-learning-hidden {
-	display: none !important;
-}
 
 .pi-learning-widgets pre {
 	margin: 0 8px;
@@ -46,49 +98,109 @@
 	white-space: pre-wrap;
 }
 
-/* 角色页签（hub 花名册） */
+/* ---------- 页签（hub 花名册） ---------- */
+
 .pi-learning-tabs {
 	display: flex;
 	flex-wrap: wrap;
-	gap: 3px;
+	gap: 2px;
 	padding: 0 8px;
 }
 .pi-learning-tab {
+	position: relative;
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
 	font-size: var(--font-ui-smaller);
-	padding: 2px 8px;
+	padding: 3px 9px 5px 6px;
 	height: auto;
-	line-height: 1.6;
+	line-height: 1.5;
 	box-shadow: none;
-	background: var(--background-secondary);
+	background: transparent;
 	color: var(--text-faint);
-	border-radius: var(--radius-s);
+	border-radius: var(--radius-m);
+	transition: color 0.15s ease, background 0.15s ease;
 }
 .pi-learning-tab:hover {
 	background: var(--background-modifier-hover);
+	color: var(--text-muted);
+}
+.pi-learning-tab-glyph {
+	font-size: 0.82em;
+	opacity: 0.75;
+	transition: opacity 0.15s ease;
 }
 .pi-learning-tab-running {
 	color: var(--text-muted);
 }
 .pi-learning-tab-active {
-	background: var(--background-modifier-hover);
 	color: var(--text-normal);
 	font-weight: var(--font-semibold);
 }
+.pi-learning-tab-active .pi-learning-tab-glyph {
+	opacity: 1;
+}
+/* 活跃下划线：角色色，滑入 */
+.pi-learning-tab::after {
+	content: "";
+	position: absolute;
+	left: 9px;
+	right: 9px;
+	bottom: 1px;
+	height: 2px;
+	border-radius: 1px;
+	background: hsl(var(--pi-role-h) var(--pi-role-s) 50% / var(--pi-line-a));
+	transform: scaleX(0);
+	transform-origin: left center;
+	transition: transform 0.18s ease;
+}
+.pi-learning-tab-active::after {
+	transform: scaleX(1);
+}
+/* 状态点三态：停（隐藏）/ 运行（呼吸）/ 生成（脉冲） */
+.pi-learning-tab-dot {
+	display: none;
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	background: hsl(var(--pi-role-h) var(--pi-role-s) 50%);
+	flex-shrink: 0;
+}
+.pi-learning-tab-running .pi-learning-tab-dot {
+	display: inline-block;
+	animation: pi-learning-breathe 3s ease-in-out infinite;
+}
+.pi-learning-tab-streaming .pi-learning-tab-dot {
+	display: inline-block;
+	animation: pi-learning-pulse 1.1s ease-in-out infinite;
+}
+/* 未读点：右上角 accent 小点 */
+.pi-learning-tab-unread::before {
+	content: "";
+	position: absolute;
+	top: 2px;
+	right: 3px;
+	width: 5px;
+	height: 5px;
+	border-radius: 50%;
+	background: var(--interactive-accent);
+}
 
-/* 命令条 */
+/* ---------- 命令条 ---------- */
+
 .pi-learning-commands {
 	display: flex;
 	flex-wrap: wrap;
+	align-items: center;
 	gap: 4px 10px;
-	padding: 0 8px;
+	padding: 0 8px 6px 8px;
 	border-bottom: 1px solid var(--background-modifier-border);
-	padding-bottom: 6px;
 }
 .pi-learning-command-group {
 	display: flex;
 	align-items: center;
 	flex-wrap: wrap;
-	gap: 3px;
+	gap: 4px;
 }
 .pi-learning-command-group-title {
 	font-size: var(--font-ui-smaller);
@@ -96,32 +208,131 @@
 	margin-right: 2px;
 }
 .pi-learning-command-btn {
+	display: inline-flex;
+	align-items: center;
+	gap: 4px;
 	font-size: var(--font-ui-smaller);
-	padding: 2px 7px;
+	padding: 2px 9px;
 	height: auto;
-	line-height: 1.5;
+	line-height: 1.6;
 	box-shadow: none;
 	background: var(--background-secondary);
+	border-radius: 999px;
+	transition: background 0.15s ease, transform 0.12s ease;
 }
 .pi-learning-command-btn:hover {
 	background: var(--background-modifier-hover);
+	transform: translateY(-1px);
+}
+.pi-learning-command-icon {
+	display: inline-flex;
+	--icon-size: 12px;
+	color: var(--text-muted);
 }
 
-/* 对话记录：每实例一份容器，互斥显示 */
+/* ---------- 页签面板：空状态 + 滚动转写 ---------- */
+
 .pi-learning-transcripts {
 	flex: 1 1 auto;
 	min-height: 0;
 	display: flex;
 	flex-direction: column;
 }
+.pi-learning-pane {
+	flex: 1 1 auto;
+	min-height: 0;
+	display: flex;
+	flex-direction: column;
+	position: relative;
+}
 .pi-learning-transcript {
 	flex: 1 1 auto;
 	overflow-y: auto;
-	padding: 4px 8px;
+	padding: 6px 8px;
 	display: flex;
 	flex-direction: column;
 	gap: 8px;
 }
+
+/* 空状态：角色身份卡 / 花名册导览 */
+.pi-learning-empty {
+	position: absolute;
+	inset: 0;
+	overflow-y: auto;
+	display: flex;
+	flex-direction: column;
+	align-items: center;
+	justify-content: center;
+	gap: 6px;
+	padding: 18px 16px;
+	text-align: center;
+	animation: pi-learning-enter 0.25s ease-out;
+}
+.pi-learning-empty:not(.pi-learning-hidden) + .pi-learning-transcript {
+	visibility: hidden;
+}
+.pi-learning-empty-glyph {
+	font-size: 1.9em;
+	margin-bottom: 4px;
+}
+.pi-learning-empty-title {
+	font-size: var(--font-ui-medium);
+	font-weight: var(--font-semibold);
+	color: var(--text-normal);
+	letter-spacing: 0.06em;
+}
+.pi-learning-empty-sub {
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+	max-width: 32em;
+	line-height: 1.6;
+}
+.pi-learning-empty-hint {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	margin-top: 4px;
+}
+.pi-learning-roster-grid {
+	display: grid;
+	grid-template-columns: repeat(auto-fill, minmax(150px, 1fr));
+	gap: 8px;
+	width: 100%;
+	max-width: 560px;
+	margin-top: 10px;
+	text-align: left;
+}
+.pi-learning-roster-card {
+	background: var(--background-primary-alt);
+	border: 1px solid var(--background-modifier-border);
+	border-left: 2px solid hsl(var(--pi-role-h) var(--pi-role-s) 50% / 0.45);
+	border-radius: var(--radius-m);
+	padding: 9px 10px;
+	cursor: pointer;
+	transition: transform 0.13s ease, border-color 0.13s ease, box-shadow 0.13s ease;
+}
+.pi-learning-roster-card:hover {
+	transform: translateY(-2px);
+	border-color: hsl(var(--pi-role-h) var(--pi-role-s) 50% / 0.55);
+	box-shadow: 0 3px 14px hsl(var(--pi-role-h) var(--pi-role-s) 40% / 0.14);
+}
+.pi-learning-roster-card-head {
+	display: flex;
+	align-items: center;
+	gap: 6px;
+	margin-bottom: 4px;
+}
+.pi-learning-roster-card-name {
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-semibold);
+	color: var(--text-normal);
+}
+.pi-learning-roster-card-brief {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	line-height: 1.5;
+}
+
+/* ---------- 消息块 ---------- */
 
 /* Obsidian 对 body 设了 user-select: none，只在编辑器/阅读视图恢复；
    自定义视图需要自行恢复，否则气泡内容无法选中复制 */
@@ -137,13 +348,33 @@
 	font-size: var(--font-ui-small);
 	line-height: 1.55;
 }
+.pi-learning-enter {
+	animation: pi-learning-enter 0.22s ease-out;
+}
 .pi-learning-role {
+	display: flex;
+	align-items: center;
+	gap: 5px;
 	font-size: var(--font-ui-smaller);
 	color: var(--text-faint);
-	margin-bottom: 2px;
+	margin-bottom: 3px;
 }
+.pi-learning-role .pi-learning-glyph {
+	font-size: 0.8em;
+}
+.pi-learning-role-name {
+	font-weight: var(--font-semibold);
+	color: hsl(var(--pi-role-h) var(--pi-role-s) var(--pi-ink-l));
+}
+/* 徽章查不到（自定义状态名）时角色名保持中性 */
+.pi-learning-role .pi-learning-role-name:first-child {
+	color: var(--text-muted);
+}
+
 .pi-learning-user {
-	background: var(--background-secondary);
+	background: hsla(var(--interactive-accent-hsl), 0.09);
+	border: 1px solid hsla(var(--interactive-accent-hsl), 0.22);
+	border-radius: 14px 14px 4px 14px;
 	align-self: flex-end;
 	max-width: 92%;
 }
@@ -155,11 +386,22 @@
 	font-size: var(--font-ui-smaller);
 	color: var(--text-muted);
 	padding: 0 4px;
+	align-self: flex-end;
 }
+
 .pi-learning-assistant {
 	background: var(--background-primary-alt);
 	border: 1px solid var(--background-modifier-border);
+	max-width: 100%;
 }
+.pi-learning-assistant.pi-learning-has-role {
+	border-left: 3px solid hsl(var(--pi-role-h) var(--pi-role-s) 50% / var(--pi-line-a));
+}
+.pi-learning-assistant.pi-learning-streaming {
+	border-color: hsl(var(--pi-role-h) var(--pi-role-s) 50% / 0.45);
+	box-shadow: 0 0 0 1px hsl(var(--pi-role-h) var(--pi-role-s) 50% / 0.08), 0 2px 12px hsl(var(--pi-role-h) var(--pi-role-s) 45% / 0.1);
+}
+
 .pi-learning-md > :first-child {
 	margin-top: 0;
 }
@@ -195,6 +437,7 @@
 .pi-learning-md.markdown-rendered h6 {
 	margin: 0.7em 0 0.3em 0;
 }
+
 .pi-learning-note {
 	border-left: 3px solid var(--interactive-accent);
 	background: var(--background-secondary);
@@ -213,12 +456,16 @@
 	color: var(--text-muted);
 	font-size: var(--font-ui-smaller);
 	padding: 2px 8px;
+	align-self: center;
+	text-align: center;
 }
 .pi-learning-system-warning {
 	color: var(--text-warning);
 }
 .pi-learning-system-error {
 	color: var(--text-error);
+	align-self: stretch;
+	text-align: left;
 }
 .pi-learning-error {
 	color: var(--text-error);
@@ -226,7 +473,8 @@
 	margin-top: 4px;
 }
 
-/* 工具与思考折叠块 */
+/* ---------- 工具与思考折叠块 ---------- */
+
 .pi-learning-tool,
 .pi-learning-thinking {
 	margin: 4px 0;
@@ -237,7 +485,8 @@
 }
 .pi-learning-tool-bb {
 	border-style: solid;
-	border-color: var(--interactive-accent);
+	border-color: hsla(var(--interactive-accent-hsl), 0.55);
+	background: hsla(var(--interactive-accent-hsl), 0.05);
 }
 .pi-learning-tool-error {
 	border-color: var(--text-error);
@@ -260,12 +509,72 @@
 	border-left: 2px solid var(--background-modifier-border);
 	padding-left: 6px;
 }
+.pi-learning-tool-running {
+	border-style: dashed;
+	border-color: hsla(var(--interactive-accent-hsl), 0.55);
+}
 
-/* 输入 */
+/* ---------- 输入区：收件人徽章行 + 文本域 + @ 补全浮层 ---------- */
+
 .pi-learning-input-wrap {
 	display: flex;
-	gap: 6px;
+	flex-direction: column;
+	gap: 4px;
 	padding: 0 8px 8px 8px;
+}
+.pi-learning-input-head {
+	display: flex;
+	align-items: center;
+	justify-content: space-between;
+	gap: 8px;
+	min-height: 22px;
+}
+.pi-learning-target-chip {
+	display: inline-flex;
+	align-items: center;
+	gap: 5px;
+	height: auto;
+	padding: 1px 7px 1px 4px;
+	font-size: var(--font-ui-smaller);
+	line-height: 1.7;
+	box-shadow: none;
+	border-radius: 999px;
+	background: hsl(var(--pi-role-h) var(--pi-role-s) 50% / calc(var(--pi-wash-a) * 0.6));
+	border: 1px solid hsl(var(--pi-role-h) var(--pi-role-s) 50% / 0.3);
+	color: var(--text-muted);
+	cursor: pointer;
+	transition: background 0.15s ease;
+}
+.pi-learning-target-chip:hover {
+	background: hsl(var(--pi-role-h) var(--pi-role-s) 50% / var(--pi-wash-a));
+}
+.pi-learning-target-chip .pi-learning-glyph {
+	font-size: 0.78em;
+}
+.pi-learning-chip-prefix {
+	color: var(--text-faint);
+}
+.pi-learning-chip-name {
+	font-weight: var(--font-semibold);
+	color: var(--text-normal);
+}
+.pi-learning-chip-chevron {
+	display: inline-flex;
+	--icon-size: 12px;
+	color: var(--text-faint);
+}
+.pi-learning-input-hint {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	white-space: nowrap;
+	overflow: hidden;
+	text-overflow: ellipsis;
+}
+
+.pi-learning-input-row {
+	position: relative;
+	display: flex;
+	gap: 6px;
 	align-items: flex-end;
 }
 .pi-learning-input-area {
@@ -273,12 +582,77 @@
 	resize: vertical;
 	min-height: 60px;
 	font-size: var(--font-ui-small);
+	border-radius: 10px;
+	transition: border-color 0.15s ease, box-shadow 0.15s ease;
+}
+.pi-learning-input-area:focus {
+	border-color: hsla(var(--interactive-accent-hsl), 0.6);
+	box-shadow: 0 0 0 2px hsla(var(--interactive-accent-hsl), 0.15);
 }
 .pi-learning-send {
 	flex-shrink: 0;
+	display: inline-flex;
+	align-items: center;
+	justify-content: center;
+	width: 34px;
+	height: 34px;
+	padding: 0;
+	border-radius: 10px;
+	--icon-size: 16px;
 }
 
-/* 模态框 */
+/* @ 补全浮层 */
+.pi-learning-mention {
+	position: absolute;
+	bottom: calc(100% + 6px);
+	left: 0;
+	min-width: 240px;
+	max-width: 100%;
+	max-height: 300px;
+	overflow-y: auto;
+	z-index: 10;
+	background: var(--background-primary);
+	border: 1px solid var(--background-modifier-border);
+	border-radius: var(--radius-m);
+	box-shadow: 0 6px 24px rgba(0, 0, 0, 0.18);
+	padding: 4px;
+	animation: pi-learning-enter 0.14s ease-out;
+}
+.pi-learning-mention-item {
+	display: flex;
+	align-items: flex-start;
+	gap: 8px;
+	padding: 5px 8px;
+	border-radius: var(--radius-s);
+	border-left: 2px solid transparent;
+	cursor: pointer;
+}
+.pi-learning-mention-item:hover {
+	background: var(--background-modifier-hover);
+}
+.pi-learning-mention-active {
+	background: hsl(var(--pi-role-h) var(--pi-role-s) 50% / var(--pi-wash-a));
+	border-left-color: hsl(var(--pi-role-h) var(--pi-role-s) 50% / 0.7);
+}
+.pi-learning-mention-item .pi-learning-glyph {
+	margin-top: 1px;
+}
+.pi-learning-mention-body {
+	min-width: 0;
+}
+.pi-learning-mention-label {
+	font-size: var(--font-ui-small);
+	font-weight: var(--font-semibold);
+	color: var(--text-normal);
+}
+.pi-learning-mention-brief {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+	line-height: 1.4;
+}
+
+/* ---------- 模态框 ---------- */
+
 .pi-learning-modal-body {
 	white-space: pre-wrap;
 	margin-bottom: 12px;
@@ -301,7 +675,8 @@
 	resize: vertical;
 }
 
-/* 顶栏模型：可点击切换 */
+/* ---------- 顶栏模型：可点击切换 ---------- */
+
 .pi-learning-model-link {
 	cursor: pointer;
 	text-decoration: underline dotted;
@@ -314,7 +689,8 @@
 	color: var(--text-warning);
 }
 
-/* 流式渲染：增量块、光标、进行中指示 */
+/* ---------- 流式渲染：增量块、光标、进行中指示 ---------- */
+
 .pi-learning-stream-block + .pi-learning-stream-block,
 .pi-learning-stream-block + .pi-learning-stream-tail:not(:empty) {
 	margin-top: 0.6em;
@@ -337,11 +713,6 @@
 	border-radius: 1px;
 	animation: pi-learning-blink 1s steps(2, start) infinite;
 }
-@keyframes pi-learning-blink {
-	to {
-		visibility: hidden;
-	}
-}
 .pi-learning-dots::after {
 	content: "";
 	display: inline-block;
@@ -349,24 +720,12 @@
 	text-align: left;
 	animation: pi-learning-dots 1.2s steps(4, end) infinite;
 }
-@keyframes pi-learning-dots {
-	0% { content: ""; }
-	25% { content: "."; }
-	50% { content: ".."; }
-	75% { content: "..."; }
-}
-.pi-learning-streaming {
-	border-color: var(--interactive-accent);
-}
-.pi-learning-tool-running {
-	border-style: dashed;
-	border-color: var(--interactive-accent);
-}
 .pi-learning-assistant-body > * + * {
 	margin-top: 6px;
 }
 
-/* 用户消息前的标记（[mode: hint]、[begin-session] 等） */
+/* ---------- 用户消息前的标记（[mode: hint]、[begin-session] 等） ---------- */
+
 .pi-learning-tags {
 	display: flex;
 	flex-wrap: wrap;
@@ -384,4 +743,71 @@
 }
 .pi-learning-user-md p {
 	white-space: pre-wrap;
+}
+
+/* ---------- 动画 ---------- */
+
+@keyframes pi-learning-enter {
+	from {
+		opacity: 0;
+		transform: translateY(4px);
+	}
+	to {
+		opacity: 1;
+		transform: none;
+	}
+}
+@keyframes pi-learning-breathe {
+	0%,
+	100% {
+		opacity: 0.45;
+	}
+	50% {
+		opacity: 1;
+	}
+}
+@keyframes pi-learning-pulse {
+	0%,
+	100% {
+		transform: scale(1);
+		opacity: 1;
+	}
+	50% {
+		transform: scale(1.45);
+		opacity: 0.6;
+	}
+}
+@keyframes pi-learning-blink {
+	to {
+		visibility: hidden;
+	}
+}
+@keyframes pi-learning-dots {
+	0% {
+		content: "";
+	}
+	25% {
+		content: ".";
+	}
+	50% {
+		content: "..";
+	}
+	75% {
+		content: "...";
+	}
+}
+
+@media (prefers-reduced-motion: reduce) {
+	.pi-learning-enter,
+	.pi-learning-empty,
+	.pi-learning-mention,
+	.pi-learning-tab-dot,
+	.pi-learning-cursor {
+		animation: none !important;
+	}
+	.pi-learning-tab::after,
+	.pi-learning-roster-card,
+	.pi-learning-command-btn {
+		transition: none !important;
+	}
 }

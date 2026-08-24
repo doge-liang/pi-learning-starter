@@ -43,6 +43,8 @@ type AssistantBlock = Extract<Block, { kind: "assistant" }>;
 export class Transcript {
 	blocks: Block[] = [];
 	private current: AssistantBlock | null = null;
+	/** 历史批量重建时关闭进入动画，只有增量新块做淡入 */
+	private animate = true;
 
 	constructor(
 		private app: App,
@@ -50,6 +52,8 @@ export class Transcript {
 		private container: HTMLElement,
 		/** 取当前角色名；消息开始时快照到块上（历史消息不记录角色，重载后无从追溯，故只标注新消息） */
 		private roleName?: () => string | undefined,
+		/** 角色名 → 徽章外观；查不到则不画徽章只显示名字 */
+		private badge?: (roleLabel: string) => { hue: number; glyph: string } | undefined,
 	) {}
 
 	clear(): void {
@@ -298,9 +302,14 @@ export class Transcript {
 
 	renderAll(): void {
 		this.container.empty();
-		for (const b of this.blocks) {
-			detachDom(b);
-			this.renderBlock(b);
+		this.animate = false;
+		try {
+			for (const b of this.blocks) {
+				detachDom(b);
+				this.renderBlock(b);
+			}
+		} finally {
+			this.animate = true;
 		}
 		this.scrollToBottom();
 	}
@@ -316,10 +325,12 @@ export class Transcript {
 			return;
 		}
 		const stick = this.isNearBottom();
+		const fresh = !b.el;
 		const el = b.el ?? this.container.createDiv();
 		b.el = el;
 		el.empty();
 		el.className = `pi-learning-block pi-learning-${b.kind}`;
+		if (fresh && this.animate) el.addClass("pi-learning-enter");
 		switch (b.kind) {
 			case "user": {
 				// 不显示标题，靠右对齐即可辨识用户消息
@@ -361,12 +372,22 @@ export class Transcript {
 		const stick = this.isNearBottom();
 		if (!b.el) {
 			b.el = this.container.createDiv({ cls: "pi-learning-block pi-learning-assistant" });
+			if (this.animate) b.el.addClass("pi-learning-enter");
 			b.roleEl = b.el.createDiv({ cls: "pi-learning-role" });
 			b.bodyEl = b.el.createDiv({ cls: "pi-learning-assistant-body" });
 		}
 		b.el.toggleClass("pi-learning-streaming", b.streaming);
 		b.roleEl!.empty();
-		if (b.role) b.roleEl!.createSpan({ text: b.role });
+		if (b.role) {
+			const badge = this.badge?.(b.role);
+			if (badge) {
+				const g = b.roleEl!.createSpan({ cls: "pi-learning-glyph", text: badge.glyph });
+				g.style.setProperty("--pi-role-h", String(badge.hue));
+				b.el.style.setProperty("--pi-role-h", String(badge.hue));
+				b.el.addClass("pi-learning-has-role");
+			}
+			b.roleEl!.createSpan({ cls: "pi-learning-role-name", text: b.role });
+		}
 		if (b.streaming) b.roleEl!.createSpan({ cls: "pi-learning-dots", text: b.role ? " · 生成中" : "生成中" });
 		// 历史消息不记录角色：既无角色也不在生成时整行隐藏
 		b.roleEl!.toggleClass("pi-learning-hidden", !b.role && !b.streaming);
