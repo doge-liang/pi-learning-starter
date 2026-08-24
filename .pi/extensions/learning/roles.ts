@@ -316,6 +316,8 @@ ${bb.readProposalText(file)}` : "（未指定；请让学习者重新发起评�
 			parts.push("## 当前单元", j(unit ?? null));
 			parts.push("## 单元资料", j(bb.sources().filter((s) => srcIds.has(s.id))));
 			parts.push("## 相关概念与掌握度", j(bb.conceptBrief(ids)));
+			// 全量 id 索引：学习者提到本单元之外的概念（写术语表、跨单元引用）时按名称查 id 用
+			parts.push("## 全部概念索引（仅 id 与名称；跨单元引用时查此表）", j(bb.concepts().map((c) => ({ id: c.id, name: c.name }))));
 			parts.push("## 学习者已写的术语表条目", [...ids].filter((id) => gl.has(id)).map((id) => gl.get(id)).join("\n\n") || "（无）");
 			parts.push("## 未解决错误", j(bb.unresolvedErrors(ids).slice(-10)));
 			if (state.prequestions.length) parts.push("## 本会话预问题", j(state.prequestions));

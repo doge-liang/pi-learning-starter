@@ -108,8 +108,9 @@ describe("学习工作流（全流程）", () => {
 		// 选定：派发 /go placement
 		uiScript.select.push("进入水平测试官：确定画像并定位起点");
 		const go = await pi.tool("bb_route_ask").execute("t", { routes: ["placement"] }, undefined, undefined, ctx);
-		assert.match(go.content[0].text, /已派发执行/);
+		assert.match(go.content[0].text, /已派发.*本回合结束后执行/);
 		assert.equal(pi.lastMessage(), "/go placement");
+		assert.deepEqual(pi.sentMessageOptions.at(-1), { deliverAs: "followUp", expandPromptTemplates: true });
 	});
 
 	it("/learn 输出概览与建议（含已搁置标记），选稍后不执行", async () => {
@@ -496,6 +497,7 @@ describe("学习工作流（全流程）", () => {
 			});
 			const ctxText = (await contextOf(pi, ctx))?.message?.content ?? "";
 			assert.ok(ctxText.includes("本会话预问题") && ctxText.includes("dl-ch6"));
+			assert.ok(ctxText.includes("全部概念索引") && ctxText.includes('"jit"'), "单元之外的概念 id 也可查（术语表跨单元引用）");
 
 			uiScript.editor.push("requires_grad 为 true 且由用户创建的张量", "运算的依赖关系");
 			uiScript.select.push("4", "2");
@@ -636,6 +638,7 @@ describe("学习工作流（全流程）", () => {
 				ctx,
 			);
 			assert.equal(pi.lastMessage(), "/go take", "尾部询问派发作答");
+			assert.deepEqual(pi.sentMessageOptions.at(-1), { deliverAs: "followUp", expandPromptTemplates: true }, "派发排到回合后执行，不打断当前回合");
 			const pending = readdirFirst(join(bbDir, "assessments"), ".json", "pending-");
 			assert.ok(pending);
 			const events = readJsonl(join(bbDir, "events.jsonl"));
@@ -992,6 +995,25 @@ describe("学习工作流（全流程）", () => {
 			const gap = readJsonl(join(bbDir, "events.jsonl")).filter((e) => e.type === "sources_gap").at(-1);
 			assert.equal(gap.payload.from, "curate");
 			assert.deepEqual(gap.payload.units, ["u01b"]);
+		});
+
+		it("再次收集已有副本的资料：先问保留还是重新获取，下载分支不再被永久跳过", async () => {
+			// 保留现有副本：跳过下载与登记，只走 Zotero 询问
+			uiScript.select.push("保留现有副本");
+			uiScript.confirm.push(false); // 不入 Zotero
+			await pi.command("go").handler("collect cs231n-bp", ctx);
+			assert.deepEqual(ctx.selects.at(-1)?.[1], ["保留现有副本", "重新下载 / 重新登记路径", "取消"]);
+			assert.equal(sourceIndex(bbDir)["cs231n-bp"].acquisition.local_path, "blackboard/library/cs231n-bp.pdf", "保留时路径不变");
+
+			// 重新登记：换成手工获取的新副本
+			const manual2 = join(bbDir, "library", "cs231n-manual.pdf");
+			writeFileSync(manual2, "manual pdf", "utf8");
+			uiScript.select.push("重新下载 / 重新登记路径");
+			uiScript.confirm.push(false); // 不重新下载直链
+			uiScript.input.push(manual2);
+			uiScript.confirm.push(false); // 不入 Zotero
+			await pi.command("go").handler("collect cs231n-bp", ctx);
+			assert.equal(sourceIndex(bbDir)["cs231n-bp"].acquisition.local_path, "blackboard/library/cs231n-manual.pdf");
 		});
 
 		it("sources_gap 事件进入下一步建议，路由回馆员补料", async () => {

@@ -84,6 +84,17 @@ export async function runCollect(bb: Blackboard, ctx: ExtensionContext, note: (t
 	const patch: Partial<Acquisition> = {};
 	let localRel = source.acquisition?.local_path;
 
+	// 0. 已有本地副本（可能是此前误下的落地页）：先问保留还是重新获取，避免下载分支被永久跳过
+	if (localRel) {
+		const suspect = /\.html?$/i.test(localRel);
+		const pick = await ctx.ui.select(
+			`已有本地副本：${localRel}${suspect ? "（HTML，可能只是落地页而非资料本身）" : ""}`,
+			["保留现有副本", "重新下载 / 重新登记路径", "取消"],
+		);
+		if (!pick || pick === "取消") return;
+		if (pick.startsWith("重新")) localRel = undefined;
+	}
+
 	// 1. 本地副本：先试直链下载，失败或没有直链时让学习者给出自己已获取的路径
 	const url = downloadableUrl(source);
 	if (!localRel && url) {
@@ -127,9 +138,10 @@ export async function runCollect(bb: Blackboard, ctx: ExtensionContext, note: (t
 	// 3. Zotero：未配置时走 file 模式写 CSL-JSON，学习者在 Zotero 里导入
 	const zoteroMode = cfg.zotero?.mode ?? "file";
 	if (patch.status === "obtained") {
+		const landingHint = localRel && /\.html?$/i.test(localRel) ? "\n注意：本地副本是 HTML，可能只是落地页；建议核实内容后再作为附件。" : "";
 		const ok = await ctx.ui.confirm(
 			"把题录送进 Zotero？",
-			`${source.title}\n模式：${zoteroMode}${zoteroMode === "file" ? "（写出 CSL-JSON，之后在 Zotero 里「文件 → 导入」）" : zoteroMode === "connector" ? "（本地 Zotero 桌面端需正在运行）" : "（Zotero Web API，会上传本地副本作为附件）"}`,
+			`${source.title}\n模式：${zoteroMode}${zoteroMode === "file" ? "（写出 CSL-JSON，之后在 Zotero 里「文件 → 导入」）" : zoteroMode === "connector" ? "（本地 Zotero 桌面端需正在运行）" : "（Zotero Web API，会上传本地副本作为附件）"}${landingHint}`,
 		);
 		if (ok) {
 			try {
