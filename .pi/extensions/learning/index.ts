@@ -21,6 +21,7 @@ import { Blackboard, shortHash } from "./blackboard.ts";
 import { registerCommands } from "./commands.ts";
 import { readConfig } from "./config.ts";
 import { buildContext, READ_TOOLS, ROLES } from "./roles.ts";
+import { hubMode } from "./route.ts";
 import { emptyState, type LearningState, persist as persistState, restore, type Role, ROLE_NAMES, takeHandoff } from "./state.ts";
 import { registerTools } from "./tools.ts";
 
@@ -99,12 +100,18 @@ export default function (pi: ExtensionAPI) {
 
 	// ---------- 每轮：角色提示 + 黑板上下文 ----------
 
+	// 常驻实例（hub）模式：角色固定在实例上，跨角色靠学习者 @ 唤醒，不切会话
+	const HUB_ADDENDUM = `
+
+## 常驻实例模式
+本会话是一个固定角色的常驻实例（花名册的一员）。不要试图切换角色或会话；流程需要其他角色时，请学习者用 @对应角色 唤醒（如 @资料管理员、@提案评审员、@复盘老师）。角色无关的动作（接受提案、闭卷作答、收集、核验、亲笔编辑器）照常进行。`;
+
 	pi.on("before_agent_start", async (event) => {
 		if (!state.role) return;
 		const context = buildContext(bb, state);
 		const hash = shortHash(context);
 		const result: { systemPrompt: string; message?: { customType: string; content: string; display: boolean } } = {
-			systemPrompt: `${event.systemPrompt}\n\n${ROLES[state.role].prompt}`,
+			systemPrompt: `${event.systemPrompt}\n\n${ROLES[state.role].prompt}${hubMode() ? HUB_ADDENDUM : ""}`,
 		};
 		if (hash !== state.contextHash) {
 			state.contextHash = hash;

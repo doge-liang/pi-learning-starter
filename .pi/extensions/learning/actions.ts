@@ -57,7 +57,7 @@ export async function runVerify(bb: Blackboard, ctx: ExtensionContext, idArg: st
 		? await ctx.ui.confirm("确认核验？", `${s.title}\n${s.locator ?? ""}\n\n只有你已亲自打开这份资料、确认它存在且适合对应单元时才确认；还没打开就选取消。`)
 		: false;
 	if (!ok) return false;
-	bb.verifySource(id, true);
+	await bb.mutate(() => bb.verifySource(id, true));
 	ctx.ui.notify(`已标记 ${id} 为已核验。`, "info");
 	return true;
 }
@@ -157,7 +157,7 @@ export async function runCollect(bb: Blackboard, ctx: ExtensionContext, note: (t
 	}
 
 	patch.at = today();
-	bb.recordAcquisition(id, patch);
+	await bb.mutate(() => bb.recordAcquisition(id, patch));
 	ctx.ui.notify(
 		patch.status === "obtained"
 			? `已登记 ${id} 为已获取${localRel ? `（${localRel}）` : ""}。亲自打开确认后再核验（对前台说，或 /go verify ${id}）。`
@@ -257,7 +257,7 @@ export async function editGloss(bb: Blackboard, ctx: ExtensionContext, conceptId
 	const body = await ctx.ui.editor(`术语表条目：${c.name}（用自己的话；先占位，理解加深后再改为完整）`, "");
 	if (!body?.trim()) return null;
 	const entry = `\n## ${c.name} <!-- id: ${c.id} -->\n状态：占位\n依赖：${c.prereqs?.length ? c.prereqs.join(", ") : "无"}\n\n${body.trim()}\n`;
-	bb.appendText("glossary.md", entry);
+	await bb.mutate(() => bb.appendText("glossary.md", entry));
 	ctx.ui.notify("已写入 glossary.md。", "info");
 	return entry;
 }

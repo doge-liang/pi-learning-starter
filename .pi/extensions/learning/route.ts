@@ -9,6 +9,7 @@
 import { existsSync } from "node:fs";
 import { isAbsolute, join } from "node:path";
 import type { Blackboard } from "./blackboard.ts";
+import type { Role } from "./state.ts";
 
 export interface Suggestion {
 	/** 稳定标识（即路由串），用于「稍后」搁置 */
@@ -48,6 +49,41 @@ export function parseRoute(route: string): { action: RouteAction; args: string }
 	const m = route.trim().match(/^(\S+)(?:\s+([\s\S]*))?$/);
 	if (!m || !(ROUTE_ACTIONS as readonly string[]).includes(m[1])) return null;
 	return { action: m[1] as RouteAction, args: (m[2] ?? "").trim() };
+}
+
+/** 常驻实例（hub）模式：由 hub 以 LEARN_HUB=1 启动，角色固定在实例上，跨角色不切会话而是提示学习者 @ */
+export function hubMode(): boolean {
+	return process.env.LEARN_HUB === "1";
+}
+
+/**
+ * 路由要进入的角色；null 表示角色无关（接受、收集、核验、编辑器等学习者侧动作，任何实例都可执行）。
+ * hub 模式下用于判定「本实例执行」还是「提示学习者 @ 对应角色」。
+ */
+export function targetRoleOfRoute(bb: Blackboard, route: string): Role | null {
+	const parsed = parseRoute(route);
+	if (!parsed) return null;
+	switch (parsed.action) {
+		case "placement":
+			return "placement";
+		case "plan":
+			return "planner";
+		case "critique":
+			return "critic";
+		case "sources":
+		case "curate":
+			return "librarian";
+		case "read":
+			return "tutor";
+		case "review":
+			return "reviewer";
+		case "assess":
+			return "assessor";
+		case "take":
+			return pendingTest(bb)?.startsWith("placement/") ? "placement" : "assessor";
+		default:
+			return null;
+	}
 }
 
 /** 复盘提纲是否还没有学习者亲笔的部分（提纲之后为空） */

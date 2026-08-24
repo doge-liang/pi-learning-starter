@@ -15,6 +15,7 @@ import {
 	writeFileSync,
 } from "node:fs";
 import { join } from "node:path";
+import { withBlackboardLock } from "./lock.ts";
 
 export const LEVELS = ["untouched", "touched", "learned", "tested", "consolidated"] as const;
 export type Level = (typeof LEVELS)[number];
@@ -206,6 +207,14 @@ export class Blackboard {
 
 	path(...parts: string[]): string {
 		return join(this.root, ...parts);
+	}
+
+	/**
+	 * 跨进程互斥地执行一段黑板变更。fn 应是短促的纯文件读改写；
+	 * 不要在 fn 里弹对话框、下载或做任何长时间操作（锁的陈旧回收假设毫秒级持有）。
+	 */
+	async mutate<T>(fn: () => T | Promise<T>): Promise<T> {
+		return withBlackboardLock(this.cwd, fn);
 	}
 
 	// ---------- 基础 I/O ----------
