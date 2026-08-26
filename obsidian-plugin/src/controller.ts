@@ -7,8 +7,10 @@
 import { type App, Notice } from "obsidian";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { PiAuth } from "./auth.ts";
 import { locatePi } from "./locate.ts";
 import { describeSession, listSessions } from "./sessions.ts";
+import { pickProviderModel, type RpcModel } from "./ui/model-picker.ts";
 import { PiRpcClient } from "./rpc/client.ts";
 import type { AgentMessage, RpcEvent, RpcState, UiRequest, UiResponse } from "./rpc/types.ts";
 import type { PiLearningSettings } from "./settings.ts";
@@ -267,24 +269,26 @@ export class LearningController {
 		await this.applyPreferredModel();
 	}
 
-	/** 弹出可用模型列表，选中即切换；记到本角色的设置里，下次启动沿用 */
+	/**
+	 * 两级模型选择：先供应商（含未登录的，选中即走官方登录流程），再模型。
+	 * 选中记到本角色的设置里；登录成功则重启本实例加载新凭据后接着选。
+	 */
 	async pickModel(): Promise<void> {
 		const client = this.requireClient();
-		const models = await client.getAvailableModels();
-		if (!models.length) {
-			new Notice("pi 没有可用模型：请在终端运行 pi 并 /login，或配置 API key 环境变量。", 8000);
-			return;
+		const models = (await client.getAvailableModels()) as RpcModel[];
+		const s = this.settings();
+		const auth = PiAuth.load(locatePi(s.piPath, s.nodePath || "node", s.projectDir?.trim() || undefined));
+		const r = await pickProviderModel(this.app, { available: models, auth });
+		if (!r) return;
+		if (r.kind === "logged_in") {
+			new Notice(`已登录 ${r.provider}，正在重启【${this.spec.label}】以加载新凭据…`);
+			await this.start();
+			return this.pickModel();
 		}
-		const current = this.state?.model ? `${this.state.model.provider}/${this.state.model.id}` : "";
-		const labels = models.map((m) => `${m.provider}/${m.id}${m.name && m.name !== m.id ? `  ${m.name}` : ""}`);
-		const picked = await selectModal(this.app, `选择模型（当前：${current || "无"}）`, labels);
-		if (!picked) return;
-		const m = models[labels.indexOf(picked)];
-		if (!m) return;
-		await client.setModel(m.provider, m.id);
-		this.onModelChosen?.(this.spec.role, `${m.provider}/${m.id}`);
+		await client.setModel(r.provider, r.id);
+		this.onModelChosen?.(this.spec.role, `${r.provider}/${r.id}`);
 		await this.refreshState();
-		new Notice(`已为【${this.spec.label}】切换到 ${m.provider}/${m.id}`);
+		new Notice(`已为【${this.spec.label}】切换到 ${r.provider}/${r.id}`);
 	}
 
 	/** 弹出当前模型支持的思考等级 */

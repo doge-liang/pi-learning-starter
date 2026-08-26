@@ -675,6 +675,92 @@
 	resize: vertical;
 }
 
+/* ---------- 供应商选择与登录流程 ---------- */
+
+.pi-learning-provider-item {
+	display: block;
+}
+.pi-learning-provider-head {
+	display: flex;
+	align-items: baseline;
+	justify-content: space-between;
+	gap: 8px;
+}
+.pi-learning-provider-name {
+	font-weight: var(--font-semibold);
+}
+.pi-learning-provider-cred {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-faint);
+	white-space: nowrap;
+}
+.pi-learning-provider-cred-ok {
+	color: var(--color-green, var(--text-accent));
+}
+.pi-learning-provider-sub {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
+.pi-learning-auth-log {
+	display: flex;
+	flex-direction: column;
+	gap: 8px;
+	margin-bottom: 10px;
+}
+.pi-learning-auth-info,
+.pi-learning-auth-progress {
+	font-size: var(--font-ui-small);
+	color: var(--text-muted);
+}
+.pi-learning-auth-url,
+.pi-learning-auth-device {
+	display: flex;
+	flex-direction: column;
+	gap: 6px;
+	padding: 10px;
+	background: var(--background-secondary);
+	border-radius: var(--radius-m);
+}
+.pi-learning-auth-link {
+	font-size: var(--font-ui-smaller);
+	word-break: break-all;
+}
+.pi-learning-auth-code {
+	font-family: var(--font-monospace);
+	font-size: 1.6em;
+	font-weight: var(--font-semibold);
+	letter-spacing: 0.2em;
+	text-align: center;
+	padding: 6px 0;
+	user-select: text;
+	-webkit-user-select: text;
+}
+.pi-learning-auth-prompt-msg {
+	margin-bottom: 6px;
+	font-size: var(--font-ui-small);
+}
+.pi-learning-auth-option {
+	display: block;
+	width: 100%;
+	text-align: left;
+	height: auto;
+	padding: 8px 10px;
+	margin-bottom: 6px;
+	background: var(--background-secondary);
+	border-radius: var(--radius-m);
+}
+.pi-learning-auth-option:hover {
+	background: var(--background-modifier-hover);
+}
+.pi-learning-auth-option-label {
+	font-weight: var(--font-semibold);
+}
+.pi-learning-auth-option-desc {
+	font-size: var(--font-ui-smaller);
+	color: var(--text-muted);
+}
+
 /* ---------- 顶栏模型：可点击切换 ---------- */
 
 .pi-learning-model-link {

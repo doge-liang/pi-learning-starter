@@ -3,8 +3,11 @@
  * 不在这里保存任何密钥：模型凭据由 pi 自己管理（`pi` 里 `/login`，或环境变量）。
  */
 import { type App, Notice, PluginSettingTab, Setting } from "obsidian";
+import { PiAuth } from "./auth.ts";
+import { locatePi } from "./locate.ts";
 import type PiLearningPlugin from "./main.ts";
 import { ROSTER } from "./roster.ts";
+import { pickProviderForLogin } from "./ui/model-picker.ts";
 
 export interface PiLearningSettings {
 	/** 含 .pi/extensions/learning 与 blackboard/ 的目录；留空则在首次打开时尝试用 vault 根目录 */
@@ -163,6 +166,44 @@ export class PiLearningSettingTab extends PluginSettingTab {
 					}
 				}),
 		);
-		containerEl.createEl("p", { cls: "setting-item-description", text: "模型凭据不在本插件保存：在终端运行 pi 并 /login，或把 API key 放到用户级环境变量，pi 子进程会自行读取。" });
+		this.renderCredentials(containerEl);
+	}
+
+	/** 供应商凭据：读 pi 的 auth.json 列已登录的（可退出），并可发起官方登录流程（OAuth / API key） */
+	private renderCredentials(containerEl: HTMLElement): void {
+		const s = this.plugin.settings;
+		new Setting(containerEl).setName("供应商凭据").setDesc("凭据存在 pi 自己的 auth.json，本插件只调用 pi 的官方登录 / 登出流程，不保存任何密钥。改动后需重启实例生效。环境变量里的 API key 不在此显示。").setHeading();
+		const auth = PiAuth.load(locatePi(s.piPath, s.nodePath || "node", s.projectDir?.trim() || undefined));
+		if (!auth) {
+			containerEl.createEl("p", { cls: "setting-item-description", text: "找不到 pi 的安装（node + cli.js 形态），无法在此管理凭据；请在终端运行 pi 并 /login。" });
+			return;
+		}
+		for (const p of auth.listProviders().filter((x) => x.cred)) {
+			new Setting(containerEl)
+				.setName(p.name)
+				.setDesc(p.cred === "oauth" ? "已登录 · OAuth" : "已登录 · API key")
+				.addButton((b) =>
+					b.setButtonText("退出登录").setWarning().onClick(async () => {
+						try {
+							await auth.logout(p.id);
+							new Notice(`已退出 ${p.name}；重启实例后生效。`);
+						} catch (e) {
+							new Notice((e as Error).message, 8000);
+						}
+						this.display();
+					}),
+				);
+		}
+		new Setting(containerEl).setName("登录供应商").setDesc("OAuth 在浏览器完成授权；API key 由你在弹窗中亲自粘贴。").addButton((b) =>
+			b.setButtonText("选择供应商…").setCta().onClick(async () => {
+				try {
+					const id = await pickProviderForLogin(this.app, auth);
+					if (id) new Notice(`已登录 ${id}；重启相关实例后生效。`);
+				} catch (e) {
+					new Notice(`登录失败：${(e as Error).message}`, 10000);
+				}
+				this.display();
+			}),
+		);
 	}
 }
