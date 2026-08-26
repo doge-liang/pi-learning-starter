@@ -158,8 +158,15 @@ export class LearningView extends ItemView {
 				tab.container,
 				() => controller.statuses.get("learning")?.split(" · ")[0] ?? spec.label,
 				badgeByLabel,
-				// 失败回合的重试：把触发它的用户输入按正常路径重新派发（入队、回显、群转写）
+				// 失败重试 / 重新生成 / 原样重发：把用户输入按正常路径重新派发（入队、回显、群转写）
 				(text) => this.manager.dispatch(spec.role, text),
+				// 编辑重发：填回输入框（按钮在本页签里，收件人即本角色），修改后正常发送
+				(text) => {
+					this.inputEl.value = text;
+					this.inputEl.focus();
+					this.inputEl.setSelectionRange(text.length, text.length);
+					this.updateMention();
+				},
 			);
 			this.buildRoleEmptyState(tab.emptyEl, spec);
 			tab.surface = this.makeSurface(spec.role, spec.label, tab.transcript);

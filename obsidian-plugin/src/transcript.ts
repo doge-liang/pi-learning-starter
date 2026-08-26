@@ -34,7 +34,7 @@ export type AssistantPart = TextPart | ThinkingPart | ToolPart;
 export type Block =
 	| { kind: "user"; text: string; el?: HTMLElement }
 	| { kind: "command"; text: string; el?: HTMLElement }
-	| { kind: "assistant"; parts: AssistantPart[]; streaming: boolean; role?: string; error?: string; el?: HTMLElement; roleEl?: HTMLElement; bodyEl?: HTMLElement; errorEl?: HTMLElement }
+	| { kind: "assistant"; parts: AssistantPart[]; streaming: boolean; role?: string; error?: string; el?: HTMLElement; roleEl?: HTMLElement; bodyEl?: HTMLElement; errorEl?: HTMLElement; actionsEl?: HTMLElement }
 	| { kind: "note"; text: string; el?: HTMLElement }
 	| { kind: "custom"; customType: string; text: string; el?: HTMLElement }
 	| { kind: "system"; text: string; level: "info" | "warning" | "error"; el?: HTMLElement };
@@ -55,8 +55,10 @@ export class Transcript {
 		private roleName?: () => string | undefined,
 		/** 角色名 → 徽章外观；查不到则不画徽章只显示名字 */
 		private badge?: (roleLabel: string) => { hue: number; glyph: string } | undefined,
-		/** 重发一条用户消息（失败回合的「重试」按钮）；未提供则不渲染重试 */
+		/** 重发一条用户消息（失败重试 / 重新生成 / 原样重发都走这里）；未提供则不渲染这些按钮 */
 		private onRetry?: (text: string) => void,
+		/** 把消息文本填回输入框供修改后发送；未提供则不渲染「编辑」 */
+		private onEdit?: (text: string) => void,
 	) {}
 
 	clear(): void {
@@ -348,10 +350,12 @@ export class Transcript {
 					const body = el.createDiv({ cls: "pi-learning-md pi-learning-user-md markdown-rendered" });
 					void MarkdownRenderer.render(this.app, rest, body, "", this.component);
 				}
+				this.renderUserActions(el, b.text);
 				break;
 			}
 			case "command":
 				el.createSpan({ cls: "pi-learning-command", text: b.text });
+				this.renderUserActions(el, b.text);
 				break;
 			case "system":
 				el.addClass(`pi-learning-system-${b.level}`);
@@ -422,7 +426,36 @@ export class Transcript {
 			b.errorEl.remove();
 			b.errorEl = undefined;
 		}
+		// 正常回合的「重新生成」：悬停显现；语义与失败重试一致——重新派发触发它的输入，追加新回合
+		const regenText = this.onRetry && !b.streaming && !b.error ? this.retryTextFor(b) : undefined;
+		if (regenText) {
+			if (!b.actionsEl) b.actionsEl = b.el.createDiv({ cls: "pi-learning-msg-actions" });
+			b.actionsEl.empty();
+			const btn = b.actionsEl.createEl("button", {
+				cls: "pi-learning-msg-action",
+				text: "重新生成",
+				attr: { title: "以触发本回合的输入重新派发（追加新回合，不改写历史）" },
+			});
+			btn.addEventListener("click", () => this.onRetry?.(regenText));
+		} else if (b.actionsEl) {
+			b.actionsEl.remove();
+			b.actionsEl = undefined;
+		}
 		if (stick) this.scrollToBottom();
+	}
+
+	/** 用户 / 命令消息的悬停操作：编辑（填回输入框）与原样重发 */
+	private renderUserActions(el: HTMLElement, text: string): void {
+		if (!this.onRetry && !this.onEdit) return;
+		const row = el.createDiv({ cls: "pi-learning-msg-actions" });
+		if (this.onEdit) {
+			const btn = row.createEl("button", { cls: "pi-learning-msg-action", text: "编辑", attr: { title: "填回输入框，修改后发送" } });
+			btn.addEventListener("click", () => this.onEdit?.(text));
+		}
+		if (this.onRetry) {
+			const btn = row.createEl("button", { cls: "pi-learning-msg-action", text: "重发", attr: { title: "原样重新发送（追加新回合）" } });
+			btn.addEventListener("click", () => this.onRetry?.(text));
+		}
 	}
 
 	private ensurePartEl(p: AssistantPart, body: HTMLElement): HTMLElement {
@@ -521,7 +554,7 @@ function setTextIfChanged(el: HTMLElement, text: string): void {
 function detachDom(b: Block): void {
 	b.el = undefined;
 	if (b.kind === "assistant") {
-		b.roleEl = b.bodyEl = b.errorEl = undefined;
+		b.roleEl = b.bodyEl = b.errorEl = b.actionsEl = undefined;
 		for (const p of b.parts) {
 			if (!p) continue;
 			p.el = undefined;

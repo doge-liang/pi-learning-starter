@@ -490,6 +490,35 @@
 	background: var(--background-modifier-hover);
 }
 
+/* 消息操作（悬停显现）：用户 / 命令的「编辑」「重发」，助手回合的「重新生成」 */
+.pi-learning-msg-actions {
+	display: flex;
+	gap: 6px;
+	justify-content: flex-end;
+	margin-top: 4px;
+	opacity: 0;
+	transition: opacity 0.12s ease;
+}
+.pi-learning-block:hover .pi-learning-msg-actions,
+.pi-learning-msg-actions:focus-within {
+	opacity: 1;
+}
+.pi-learning-msg-action {
+	font-size: var(--font-ui-smaller);
+	padding: 0 9px;
+	height: auto;
+	line-height: 1.7;
+	box-shadow: none;
+	border-radius: 999px;
+	background: var(--background-secondary);
+	color: var(--text-muted);
+	cursor: pointer;
+}
+.pi-learning-msg-action:hover {
+	background: var(--background-modifier-hover);
+	color: var(--text-normal);
+}
+
 /* ---------- 工具与思考折叠块 ---------- */
 
 .pi-learning-tool,
