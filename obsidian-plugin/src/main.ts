@@ -57,7 +57,8 @@ export default class PiLearningPlugin extends Plugin {
 
 	async loadSettings(): Promise<void> {
 		const loaded = ((await this.loadData()) ?? {}) as Partial<PiLearningSettings>;
-		this.settings = { ...DEFAULT_SETTINGS, ...loaded, roleSessions: { ...(loaded.roleSessions ?? {}) }, roleModels: { ...(loaded.roleModels ?? {}) } };
+		this.settings = { ...DEFAULT_SETTINGS, ...loaded, roleSessions: { ...(loaded.roleSessions ?? {}) }, roleModels: { ...(loaded.roleModels ?? {}) }, projectHistory: [...(loaded.projectHistory ?? [])] };
+		if (this.settings.projectDir && !this.settings.projectHistory.includes(this.settings.projectDir)) this.settings.projectHistory.unshift(this.settings.projectDir);
 		// 首次使用：若 vault 根目录本身就是学习项目，直接用它
 		if (!this.settings.projectDir) {
 			const base = this.vaultBasePath();

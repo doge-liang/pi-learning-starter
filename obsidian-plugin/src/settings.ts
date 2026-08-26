@@ -6,12 +6,16 @@ import { type App, Notice, PluginSettingTab, Setting } from "obsidian";
 import { PiAuth } from "./auth.ts";
 import { locatePi } from "./locate.ts";
 import type PiLearningPlugin from "./main.ts";
+import { initLearningProject, isLearningProject } from "./project.ts";
 import { ROSTER } from "./roster.ts";
+import { inputModal, selectModal } from "./ui/modals.ts";
 import { pickProviderForLogin } from "./ui/model-picker.ts";
 
 export interface PiLearningSettings {
 	/** 含 .pi/extensions/learning 与 blackboard/ 的目录；留空则在首次打开时尝试用 vault 根目录 */
 	projectDir: string;
+	/** 用过的学习项目目录（黑板切换列表；含当前，去重，新近在前） */
+	projectHistory: string[];
 	/** pi 的 dist/cli.js 或 pi 可执行文件；留空自动查找 */
 	piPath: string;
 	/** node 可执行文件；留空用 PATH 上的 node */
@@ -36,6 +40,7 @@ export interface PiLearningSettings {
 
 export const DEFAULT_SETTINGS: PiLearningSettings = {
 	projectDir: "",
+	projectHistory: [],
 	piPath: "",
 	nodePath: "",
 	model: "",
@@ -62,15 +67,39 @@ export class PiLearningSettingTab extends PluginSettingTab {
 		const s = this.plugin.settings;
 		const save = () => void this.plugin.saveSettings();
 
-		new Setting(containerEl).setName("学习项目目录").setDesc("含 .pi/extensions/learning 与 blackboard/ 的目录（pi 以它为工作目录启动）。改动后需重启 pi。").addText((t) =>
-			t
-				.setPlaceholder("D:\\Workspace\\project\\pi-learning-starter")
-				.setValue(s.projectDir)
-				.onChange((v) => {
-					s.projectDir = v.trim();
-					save();
+		new Setting(containerEl)
+			.setName("学习项目目录（黑板）")
+			.setDesc("一块黑板 = 一个项目目录（含 blackboard/ 与 .pi/extensions/learning）。换领域不必清空文件：切换到另一块黑板，或从当前项目新建一块空黑板。切换会停止全部实例，各角色在新项目里重新开会话（旧会话仍在旧项目里，可随时切回）。")
+			.addText((t) =>
+				t
+					.setPlaceholder("D:\\Workspace\\project\\pi-learning-starter")
+					.setValue(s.projectDir)
+					.onChange((v) => {
+						s.projectDir = v.trim();
+						save();
+					}),
+			)
+			.addButton((b) =>
+				b.setButtonText("切换…").onClick(async () => {
+					const options = s.projectHistory.filter((p) => p !== s.projectDir);
+					const picked = options.length ? await selectModal(this.app, "切换到用过的黑板（也可在输入框直接改路径）", options) : undefined;
+					if (!options.length) new Notice("还没有其他用过的黑板；先「新建」一块，或直接在输入框改路径。");
+					if (picked) await this.switchProject(picked);
 				}),
-		);
+			)
+			.addButton((b) =>
+				b.setButtonText("新建…").onClick(async () => {
+					const dest = await inputModal(this.app, "新黑板的目录（不存在或为空的目录）", "D:\\Learning\\math");
+					if (!dest?.trim()) return;
+					try {
+						initLearningProject(s.projectDir, dest.trim());
+					} catch (e) {
+						new Notice((e as Error).message, 10000);
+						return;
+					}
+					await this.switchProject(dest.trim());
+				}),
+			);
 		new Setting(containerEl).setName("pi 路径").setDesc("留空自动查找全局安装的 pi（dist/cli.js）；也可填 pi 可执行文件的完整路径。").addText((t) =>
 			t
 				.setPlaceholder("自动")
@@ -223,6 +252,23 @@ export class PiLearningSettingTab extends PluginSettingTab {
 				}),
 		);
 		this.renderCredentials(containerEl);
+	}
+
+	/** 切换黑板：校验目标、停全部实例、清角色会话记录（会话按项目隔离，旧的留在旧项目里） */
+	private async switchProject(dir: string): Promise<void> {
+		if (!isLearningProject(dir)) {
+			new Notice(`不是学习项目目录（缺 blackboard/ 或 .pi/extensions/learning）：${dir}`, 10000);
+			return;
+		}
+		const s = this.plugin.settings;
+		await this.plugin.manager.stopAll();
+		const history = [dir, s.projectDir, ...s.projectHistory].filter((p, i, a) => p && a.indexOf(p) === i).slice(0, 10);
+		s.projectDir = dir;
+		s.projectHistory = history;
+		s.roleSessions = {};
+		await this.plugin.saveSettings();
+		new Notice(`已切换黑板：${dir}。实例将按需启动；群页签用顶栏「重新加载」查看新项目的转写。`, 8000);
+		this.display();
 	}
 
 	/** 供应商凭据：读 pi 的 auth.json 列已登录的（可退出），并可发起官方登录流程（OAuth / API key） */

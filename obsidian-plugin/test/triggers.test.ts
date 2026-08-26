@@ -99,6 +99,7 @@ describe("TriggerWatcher", () => {
 	// settings.ts 运行时依赖 obsidian 包（测试环境不可加载），此处手写字面量、仅类型导入
 	const settings: PiLearningSettings = {
 		projectDir: dir,
+		projectHistory: [],
 		piPath: "",
 		nodePath: "",
 		model: "",
