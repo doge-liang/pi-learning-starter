@@ -149,6 +149,16 @@ export class LearningView extends ItemView {
 			this.buildRoleEmptyState(tab.emptyEl, spec);
 			tab.surface = this.makeSurface(spec.role, spec.label, tab.transcript);
 			controller.attach(tab.surface);
+			// 视图重建（关闭侧栏再打开、reload 后实例仍在运行）时，转写是新建的空白：主动补载历史
+			if (controller.running) {
+				void controller
+					.loadHistory()
+					.then((m) => {
+						tab.transcript.loadHistory(m);
+						this.renderState();
+					})
+					.catch(() => {});
+			}
 		}
 
 		// 群时间线开屏回放（落盘的尾部）

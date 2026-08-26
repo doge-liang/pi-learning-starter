@@ -111,8 +111,10 @@ export class LearningController {
 		if (saved && existsSync(saved)) {
 			try {
 				await client.switchSession(saved);
-			} catch {
-				/* 会话文件不可用则保持新会话 */
+				this.surface?.onSystem("已续接上次会话。");
+			} catch (e) {
+				// 静默吞掉会让「新会话」与「历史没加载」无从分辨
+				this.surface?.onSystem(`上次会话续接失败（${(e as Error).message}），已新开会话。`, "warning");
 			}
 		}
 		await this.refreshState(true);
