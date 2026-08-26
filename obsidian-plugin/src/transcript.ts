@@ -8,10 +8,11 @@
  */
 import { type App, type Component, MarkdownRenderer } from "obsidian";
 import type { AgentMessage, AssistantDelta, AssistantMessage, CustomMessage, TextContent, ToolResultMessage, UserMessage } from "./rpc/types.ts";
+import { SmoothPlainText } from "./smooth-reveal.ts";
 import { StreamingMarkdown } from "./streaming-markdown.ts";
 
 export type TextPart = { type: "text"; text: string; el?: HTMLElement; md?: StreamingMarkdown };
-export type ThinkingPart = { type: "thinking"; text: string; el?: HTMLDetailsElement; body?: HTMLElement; summary?: HTMLElement };
+export type ThinkingPart = { type: "thinking"; text: string; el?: HTMLDetailsElement; body?: HTMLElement; summary?: HTMLElement; smooth?: SmoothPlainText };
 export type ToolPart = {
 	type: "tool";
 	id: string;
@@ -59,6 +60,7 @@ export class Transcript {
 	) {}
 
 	clear(): void {
+		for (const b of this.blocks) detachDom(b); // 顺带取消流式揭示的 rAF 循环
 		this.blocks = [];
 		this.current = null;
 		this.container.empty();
@@ -428,13 +430,16 @@ export class Transcript {
 		if (existing) return existing;
 		if (p.type === "text") {
 			p.el = body.createDiv({ cls: "pi-learning-md markdown-rendered" });
-			p.md = new StreamingMarkdown(this.app, this.component, p.el);
+			p.md = new StreamingMarkdown(this.app, this.component, p.el, undefined, () => {
+				if (this.isNearBottom()) this.scrollToBottom();
+			});
 			return p.el;
 		}
 		if (p.type === "thinking") {
 			p.el = body.createEl("details", { cls: "pi-learning-thinking" });
 			p.summary = p.el.createEl("summary");
 			p.body = p.el.createEl("pre");
+			p.smooth = new SmoothPlainText(p.body);
 			return p.el;
 		}
 		p.el = body.createEl("details", { cls: "pi-learning-tool" });
@@ -456,7 +461,9 @@ export class Transcript {
 			p.summary!.setText(streamingThis ? "思考中" : `思考（${p.text.length} 字）`);
 			p.summary!.toggleClass("pi-learning-dots", streamingThis);
 			if (streamingThis && !p.el!.open) p.el!.open = true;
-			setTextIfChanged(p.body!, p.text);
+			// 生成中经匀速揭示上屏并带末尾光标；结束（或轮到后面的部件）后定稿
+			if (streamingThis) p.smooth!.update(p.text);
+			else p.smooth!.finish(p.text);
 			return;
 		}
 		const isBb = p.name.startsWith("bb_");
@@ -510,7 +517,7 @@ function isLastPart(b: AssistantBlock, p: AssistantPart): boolean {
 function setTextIfChanged(el: HTMLElement, text: string): void {
 	if (el.textContent !== text) el.setText(text);
 }
-/** 丢弃一个块上的所有 DOM 引用（重载历史时重新创建） */
+/** 丢弃一个块上的所有 DOM 引用（重载历史时重新创建），并停掉挂在其上的动画循环 */
 function detachDom(b: Block): void {
 	b.el = undefined;
 	if (b.kind === "assistant") {
@@ -518,9 +525,13 @@ function detachDom(b: Block): void {
 		for (const p of b.parts) {
 			if (!p) continue;
 			p.el = undefined;
-			if (p.type === "text") p.md = undefined;
-			else if (p.type === "thinking") p.body = p.summary = undefined;
-			else p.summary = p.argsEl = p.resultEl = undefined;
+			if (p.type === "text") {
+				p.md?.destroy();
+				p.md = undefined;
+			} else if (p.type === "thinking") {
+				p.smooth?.destroy();
+				p.body = p.summary = p.smooth = undefined;
+			} else p.summary = p.argsEl = p.resultEl = undefined;
 		}
 	}
 }

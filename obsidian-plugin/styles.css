@@ -816,6 +816,22 @@
 	border-radius: 1px;
 	animation: pi-learning-blink 1s steps(2, start) infinite;
 }
+.pi-learning-thinking .pi-learning-cursor {
+	background: var(--text-muted);
+}
+/* 匀速揭示出的新字符：短促渐入；重绘会重建 span，负 animation-delay 使动画从原相位继续
+   （时长与 smooth-reveal.ts 的 FADE_MS 保持一致） */
+.pi-learning-fresh {
+	animation: pi-learning-fresh-in 0.26s ease-out both;
+}
+@keyframes pi-learning-fresh-in {
+	from {
+		opacity: 0;
+	}
+	to {
+		opacity: 1;
+	}
+}
 .pi-learning-dots::after {
 	content: "";
 	display: inline-block;
@@ -905,7 +921,8 @@
 	.pi-learning-empty,
 	.pi-learning-mention,
 	.pi-learning-tab-dot,
-	.pi-learning-cursor {
+	.pi-learning-cursor,
+	.pi-learning-fresh {
 		animation: none !important;
 	}
 	.pi-learning-tab::after,
