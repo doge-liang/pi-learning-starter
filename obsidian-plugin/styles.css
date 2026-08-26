@@ -997,6 +997,24 @@
 	text-overflow: ellipsis;
 	white-space: nowrap;
 }
+/* 编辑器弹窗里的长题干正文（闭卷作答等） */
+.pi-learning-modal-prompt {
+	max-height: 38vh;
+	overflow-y: auto;
+	margin-bottom: 8px;
+	padding: 8px 10px;
+	background: var(--background-primary-alt);
+	border-left: 3px solid var(--interactive-accent);
+	border-radius: var(--radius-s);
+	font-size: var(--font-ui-small);
+}
+.pi-learning-modal-prompt > :first-child {
+	margin-top: 0;
+}
+.pi-learning-modal-prompt > :last-child {
+	margin-bottom: 0;
+}
+
 .pi-learning-bb-editor {
 	flex: 1;
 	min-height: 280px;

@@ -62,6 +62,40 @@ export function listBlackboardFiles(projectDir: string): BlackboardFile[] {
 	return out.sort((a, b) => rank(a) - rank(b) || a.rel.localeCompare(b.rel));
 }
 
+interface ExamItem {
+	id?: string;
+	area?: string;
+	concept?: string;
+	level?: string;
+	type?: string;
+	question?: string;
+}
+
+/**
+ * 试卷文件（placement/ 或 assessments/ 下的 pending-/taken-*.json）渲染成卷面 markdown：
+ * 题干按题号排版可读；参考答案与评分要点一律不出现（闭卷——原始 JSON 视图等于泄题）。
+ * 不是试卷或结构不符返回 undefined，走普通 JSON 展示。
+ */
+export function examMarkdown(rel: string, raw: string): string | undefined {
+	if (!/^(placement|assessments)\/(pending-|taken-).*\.json$/.test(rel)) return undefined;
+	let data: { date?: string; areas?: Array<{ area?: string }>; items?: ExamItem[] };
+	try {
+		data = JSON.parse(raw);
+	} catch {
+		return undefined;
+	}
+	if (!Array.isArray(data.items) || !data.items.length) return undefined;
+	const lines: string[] = [`# 试卷${data.date ? ` · ${data.date}` : ""}`, ""];
+	const areas = (data.areas ?? []).map((a) => a?.area).filter(Boolean);
+	if (areas.length) lines.push(`考察领域：${areas.join("、")}`, "");
+	data.items.forEach((it, i) => {
+		const meta = [it.area ?? it.concept, it.level, it.type].filter(Boolean).join(" · ");
+		lines.push(`### 第 ${i + 1} 题${meta ? `（${meta}）` : ""}`, "", String(it.question ?? "").trim(), "");
+	});
+	lines.push("> 参考答案与评分要点已隐藏（闭卷）。要作答就对相应角色说，或直接发送 /go take——会按题号逐题弹出作答框。");
+	return lines.join("\n");
+}
+
 /** 黑板文件的显示文本：JSON 统一缩进美化（坏 JSON 原样），其余原样 */
 export function prettyBlackboardText(rel: string, raw: string): string {
 	if (rel.endsWith(".json")) {

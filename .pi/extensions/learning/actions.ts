@@ -24,10 +24,12 @@ export async function collectAnswers(ctx: ExtensionContext, items: Array<{ id: s
 	}
 	ctx.ui.notify(banner, "info");
 	const out: LearnerAnswer[] = [];
-	for (const it of items) {
-		const answer = await ctx.ui.editor(it.prompt, "");
+	for (let i = 0; i < items.length; i++) {
+		const it = items[i];
+		// 题号进度放最前：编辑器弹窗以首行为紧凑标题，全文渲染为正文
+		const answer = await ctx.ui.editor(`第 ${i + 1}/${items.length} 题 ${it.prompt}`, "");
 		if (answer === undefined) return null;
-		const conf = await ctx.ui.select("信心（1 完全猜测 … 5 确定）", ["1", "2", "3", "4", "5"]);
+		const conf = await ctx.ui.select(`第 ${i + 1}/${items.length} 题的信心（1 完全猜测 … 5 确定）`, ["1", "2", "3", "4", "5"]);
 		if (conf === undefined) return null;
 		out.push({ id: it.id, answer: answer.trim(), confidence: Number(conf) });
 	}

@@ -11,7 +11,7 @@
 import { readFileSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 import { type App, Component, MarkdownRenderer, Modal, Notice } from "obsidian";
-import { type BlackboardFile, listBlackboardFiles, prettyBlackboardText } from "../project.ts";
+import { type BlackboardFile, examMarkdown, listBlackboardFiles, prettyBlackboardText } from "../project.ts";
 
 const MAX_SHOW = 200_000;
 
@@ -151,6 +151,13 @@ export class BlackboardModal extends Modal {
 
 		if (!raw.trim()) {
 			this.contentPane.createDiv({ cls: "pi-learning-bb-muted", text: "（空文件）" });
+			return;
+		}
+		// 试卷渲染成卷面（隐藏参考答案）；「编辑」仍是原始 JSON——那是刻意为之的动作
+		const exam = examMarkdown(rel, raw);
+		if (exam) {
+			const md = this.contentPane.createDiv({ cls: "pi-learning-bb-md markdown-rendered" });
+			void MarkdownRenderer.render(this.app, exam, md, "", this.comp);
 			return;
 		}
 		let text = prettyBlackboardText(rel, raw);
