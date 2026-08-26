@@ -282,7 +282,10 @@ export class LearningView extends ItemView {
 			return;
 		}
 		const c = this.active();
-		if (!c.running) return;
+		if (!c.running) {
+			new Notice("实例未运行，没有可加载的会话记录；启动后会自动续接历史。");
+			return;
+		}
 		try {
 			(this.tabs.get(this.manager.activeRole) as Tab).transcript.loadHistory(await c.loadHistory());
 		} catch (e) {
