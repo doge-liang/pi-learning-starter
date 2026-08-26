@@ -10,7 +10,7 @@
  * 于是文字以稳定的节奏浮现，而不是一批一批地蹦出来。
  */
 import { type App, type Component, MarkdownRenderer } from "obsidian";
-import { closeOpenFence, splitBlocks } from "./markdown-blocks.ts";
+import { closeOpenFence, hasOpenFence, splitBlocks } from "./markdown-blocks.ts";
 import { FADE_MS, type RevealSegment, SmoothReveal, wrapTrailingFades } from "./smooth-reveal.ts";
 
 interface Segment {
@@ -26,6 +26,8 @@ export class StreamingMarkdown {
 	private lastRendered = "";
 	private pendingFrame: number | null = null;
 	private lastPaint = 0;
+	/** 下次重绘的最小间隔：由 syncBlocks 按尾块长度与围栏状态自适应调整 */
+	private nextInterval: number;
 	private finished = false;
 	private hasStreamed = false;
 	/** 已揭示并交给渲染的文本（目标全文的前缀）；finish 时用于校验与全量重绘 */
@@ -44,6 +46,7 @@ export class StreamingMarkdown {
 		/** 每次尾块上屏后调用（揭示让文字在 RPC 事件之间持续长高，滚动跟随要挂在这里） */
 		private onPainted?: () => void,
 	) {
+		this.nextInterval = minIntervalMs;
 		this.container.addClass("pi-learning-stream");
 		this.tailEl = this.container.createDiv({ cls: "pi-learning-stream-tail" });
 		this.reveal = new SmoothReveal(
@@ -103,12 +106,17 @@ export class StreamingMarkdown {
 		}
 	}
 
-	/** 揭示循环的回调：把已揭示前缀切块、追加稳定块、安排尾块重绘 */
+	/** 揭示循环的回调：只记账并安排重绘。切块与 DOM 都推迟到重绘时机，避免逐帧 O(n) 扫全文 */
 	private ingest(prefix: string, delta: string): void {
 		this.source = prefix;
 		if (delta) this.recent.push({ len: delta.length, ts: performance.now() });
-		const { blocks, tail } = splitBlocks(prefix);
-		// 已稳定的前缀不会改变；只追加新完成的块
+		this.schedulePaint();
+		if (!this.finished && this.pendingFinish === null) this.showCursor(true);
+	}
+
+	/** 重绘前置：把已揭示文本切块，追加新完成的稳定块，更新尾块文本与下次重绘间隔 */
+	private syncBlocks(): void {
+		const { blocks, tail } = splitBlocks(this.source);
 		for (let i = this.stable.length; i < blocks.length; i++) {
 			const el = this.container.createDiv({ cls: "pi-learning-stream-block" });
 			this.container.insertBefore(el, this.tailEl);
@@ -116,8 +124,9 @@ export class StreamingMarkdown {
 			void MarkdownRenderer.render(this.app, blocks[i], el, "", this.component);
 		}
 		this.tailText = tail;
-		this.schedulePaint();
-		if (!this.finished && this.pendingFinish === null) this.showCursor(true);
+		// 尾块每次重绘是整块重渲染，代码围栏还要全量重新高亮：间隔随长度与围栏状态放宽，
+		// 否则长代码流式时主线程被渲染占满，界面点不动
+		this.nextInterval = Math.max(this.minIntervalMs, Math.min(400, (hasOpenFence(tail) ? 180 : this.minIntervalMs) + tail.length / 40));
 	}
 
 	/** 揭示追平且消息已定稿：走真正的 finish */
@@ -150,7 +159,7 @@ export class StreamingMarkdown {
 
 	private schedulePaint(): void {
 		if (this.pendingFrame !== null) return;
-		const due = Math.max(0, this.minIntervalMs - (performance.now() - this.lastPaint));
+		const due = Math.max(0, this.nextInterval - (performance.now() - this.lastPaint));
 		const run = () => {
 			this.pendingFrame = requestAnimationFrame(() => {
 				this.pendingFrame = null;
@@ -163,6 +172,7 @@ export class StreamingMarkdown {
 
 	private paintTail(final: boolean): void {
 		this.lastPaint = performance.now();
+		if (!final) this.syncBlocks();
 		const display = final ? this.tailText : closeOpenFence(this.tailText);
 		if (display === this.lastRendered && !final) return;
 		this.lastRendered = display;

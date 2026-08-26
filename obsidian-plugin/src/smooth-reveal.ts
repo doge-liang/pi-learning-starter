@@ -171,6 +171,7 @@ export class SmoothPlainText {
 	private reveal: SmoothReveal;
 	private done = false;
 	private finalText = "";
+	private lastStick = 0;
 
 	constructor(host: HTMLElement) {
 		this.host = host;
@@ -232,6 +233,10 @@ export class SmoothPlainText {
 	}
 
 	private stick(): void {
+		// 读 scrollHeight 会强制同步布局，逐帧读会拖垮主线程：节流到人眼跟得上的频率
+		const now = performance.now();
+		if (now - this.lastStick < 150) return;
+		this.lastStick = now;
 		const h = this.host;
 		if (h.scrollHeight - h.scrollTop - h.clientHeight < 48) h.scrollTop = h.scrollHeight;
 	}

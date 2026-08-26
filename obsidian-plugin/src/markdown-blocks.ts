@@ -34,6 +34,18 @@ export function splitBlocks(text: string): { blocks: string[]; tail: string } {
 	return { blocks, tail };
 }
 
+/** 末尾块里是否有未闭合的围栏（重绘节流用：闭合后的代码块每次重绘都要全量重新高亮，代价大） */
+export function hasOpenFence(text: string): boolean {
+	let fence: string | null = null;
+	for (const line of text.split("\n")) {
+		const m = /^\s{0,3}(`{3,}|~{3,})/.exec(line);
+		if (!m) continue;
+		if (!fence) fence = m[1];
+		else if (line.trim().startsWith(fence[0].repeat(fence.length))) fence = null;
+	}
+	return fence !== null;
+}
+
 /** 末尾块里有未闭合的围栏时临时补上，避免把后续文本当成代码 */
 export function closeOpenFence(text: string): string {
 	let fence: string | null = null;
