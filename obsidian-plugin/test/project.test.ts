@@ -7,7 +7,7 @@ import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { after, describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
-import { initLearningProject, isLearningProject, writeSeedBlackboard } from "../src/project.ts";
+import { initLearningProject, isLearningProject, listBlackboardFiles, prettyBlackboardText, writeSeedBlackboard } from "../src/project.ts";
 
 const starterRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..", "..");
 
@@ -42,5 +42,23 @@ describe("学习项目的识别与新建", () => {
 		writeFileSync(join(occupied, "x.txt"), "y", "utf8");
 		assert.throws(() => initLearningProject(starterRoot, occupied), /非空/);
 		assert.throws(() => initLearningProject(join(base, "empty"), join(base, "another")), /不是学习项目/);
+	});
+
+	it("listBlackboardFiles：核心文件置顶、子目录递归、相对路径用 /；目录不存在返回空", () => {
+		const proj = join(base, "listing");
+		writeSeedBlackboard(join(proj, "blackboard"));
+		writeFileSync(join(proj, "blackboard", "placement", "pending-1.json"), "{}", "utf8");
+		const rels = listBlackboardFiles(proj).map((f) => f.rel);
+		assert.deepEqual(rels.slice(0, 4), ["domain.json", "concepts.json", "path.json", "sources.json"], "核心文件按既定次序置顶");
+		assert.ok(rels.includes("placement/pending-1.json"), "子目录文件带相对路径");
+		assert.ok(rels.indexOf("glossary.md") < rels.indexOf("placement/pending-1.json"), "非核心文件排在核心之后");
+		assert.deepEqual(listBlackboardFiles(join(base, "nowhere")), []);
+	});
+
+	it("prettyBlackboardText：JSON 统一缩进；坏 JSON 与非 JSON 原样返回", () => {
+		assert.equal(prettyBlackboardText("domain.json", '{"a":1}'), '{\n  "a": 1\n}');
+		assert.equal(prettyBlackboardText("domain.json", "{oops"), "{oops");
+		assert.equal(prettyBlackboardText("glossary.md", "# 术语表"), "# 术语表");
+		assert.equal(prettyBlackboardText("events.jsonl", '{"a":1}\n{"b":2}'), '{"a":1}\n{"b":2}', "jsonl 不整体解析，原样逐行显示");
 	});
 });

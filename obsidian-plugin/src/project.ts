@@ -5,7 +5,7 @@
  * 换领域重新开始的正解是「换目录」而非「清文件」——黑板、群转写、pi 会话都按目录天然隔离。
  * 新建 = 从现有项目复制扩展骨架（不带任何学习数据）+ 写一份与仓库种子等价的空黑板。
  */
-import { cpSync, existsSync, mkdirSync, readdirSync, writeFileSync } from "node:fs";
+import { cpSync, existsSync, mkdirSync, readdirSync, statSync, writeFileSync } from "node:fs";
 import { join } from "node:path";
 
 /** 学习项目的最低结构：黑板数据 + 学习扩展 */
@@ -26,6 +26,52 @@ export function initLearningProject(srcDir: string, destDir: string): void {
 		if (existsSync(join(srcDir, f))) cpSync(join(srcDir, f), join(destDir, f));
 	}
 	writeSeedBlackboard(join(destDir, "blackboard"));
+}
+
+/** 黑板文件清单里置顶的核心文件（其余按路径字典序排在后面） */
+const BLACKBOARD_PRIORITY = ["domain.json", "concepts.json", "path.json", "sources.json", "glossary.md", "errors.jsonl", "events.jsonl"];
+
+export interface BlackboardFile {
+	/** 相对 blackboard/ 的路径，统一用 / 分隔 */
+	rel: string;
+	size: number;
+}
+
+/**
+ * 列出黑板目录下的全部文件（Obsidian 隐藏点目录、不显示 .json，
+ * 黑板浏览器据此清单自行展示）。核心文件置顶，其余按路径排序。
+ */
+export function listBlackboardFiles(projectDir: string): BlackboardFile[] {
+	const root = join(projectDir, "blackboard");
+	if (!existsSync(root)) return [];
+	const out: BlackboardFile[] = [];
+	const walk = (dir: string, prefix: string, depth: number) => {
+		if (depth > 4) return;
+		for (const name of readdirSync(dir).sort()) {
+			const full = join(dir, name);
+			const st = statSync(full);
+			if (st.isDirectory()) walk(full, `${prefix}${name}/`, depth + 1);
+			else out.push({ rel: `${prefix}${name}`, size: st.size });
+		}
+	};
+	walk(root, "", 0);
+	const rank = (f: BlackboardFile) => {
+		const i = BLACKBOARD_PRIORITY.indexOf(f.rel);
+		return i === -1 ? BLACKBOARD_PRIORITY.length : i;
+	};
+	return out.sort((a, b) => rank(a) - rank(b) || a.rel.localeCompare(b.rel));
+}
+
+/** 黑板文件的显示文本：JSON 统一缩进美化（坏 JSON 原样），其余原样 */
+export function prettyBlackboardText(rel: string, raw: string): string {
+	if (rel.endsWith(".json")) {
+		try {
+			return JSON.stringify(JSON.parse(raw), null, 2);
+		} catch {
+			return raw;
+		}
+	}
+	return raw;
 }
 
 /** 与仓库种子等价的空黑板：未访谈的 domain、空概念 / 路径 / 资料、术语表头、空日志、全部子目录 */

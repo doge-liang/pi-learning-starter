@@ -7,6 +7,7 @@ import { PiAuth } from "./auth.ts";
 import { locatePi } from "./locate.ts";
 import type PiLearningPlugin from "./main.ts";
 import { initLearningProject, isLearningProject } from "./project.ts";
+import { BlackboardModal } from "./ui/blackboard-modal.ts";
 import { ROSTER } from "./roster.ts";
 import { inputModal, selectModal } from "./ui/modals.ts";
 import { pickProviderForLogin } from "./ui/model-picker.ts";
@@ -107,6 +108,13 @@ export class PiLearningSettingTab extends PluginSettingTab {
 						return;
 					}
 					await this.switchProject(dest.trim());
+				}),
+			)
+			.addButton((b) =>
+				b.setButtonText("查看黑板…").onClick(() => {
+					const dir = s.projectDir?.trim();
+					if (!dir) new Notice("尚未设置学习项目目录。");
+					else new BlackboardModal(this.app, dir).open();
 				}),
 			);
 		new Setting(containerEl).setName("pi 路径").setDesc("留空自动查找全局安装的 pi（dist/cli.js）；也可填 pi 可执行文件的完整路径。").addText((t) =>
@@ -298,7 +306,7 @@ export class PiLearningSettingTab extends PluginSettingTab {
 		s.projectHistory = history;
 		s.roleSessions = {};
 		await this.plugin.saveSettings();
-		new Notice(`已切换黑板：${dir}。实例将按需启动；群页签用顶栏「重新加载」查看新项目的转写。`, 8000);
+		new Notice(`已切换黑板：${dir}。实例将按需启动；群页签用顶栏「重新加载」查看新项目的转写。黑板文件多为 JSON，Obsidian 文件列表不显示，用 hub 顶栏或设置页的「查看黑板」浏览。`, 10000);
 		this.display();
 	}
 

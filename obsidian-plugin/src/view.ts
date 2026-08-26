@@ -14,6 +14,7 @@ import type { InstanceManager } from "./instances.ts";
 import { ROSTER, type RoleSpec, roleSpec } from "./roster.ts";
 import type { AgentMessage, RpcEvent } from "./rpc/types.ts";
 import { Transcript, contentText } from "./transcript.ts";
+import { BlackboardModal } from "./ui/blackboard-modal.ts";
 
 export const VIEW_TYPE = "pi-learning-view";
 const GROUP_TAB = "group";
@@ -101,6 +102,12 @@ export class LearningView extends ItemView {
 		this.iconButton(ctl, "file-plus", "新会话（当前实例）", () => void this.safely(() => this.active().newSession()));
 		this.abortBtn = this.iconButton(ctl, "square", "中止当前实例的回合", () => void this.safely(() => this.active().abort()));
 		this.iconButton(ctl, "refresh-cw", "重新加载当前页签的记录", () => void this.reloadActive());
+		// Obsidian 文件列表看不到黑板（点目录被隐藏、.json 不显示），浏览入口放在 hub 里
+		this.iconButton(ctl, "book-open", "查看黑板", () => {
+			const dir = this.manager.projectDir();
+			if (!dir) new Notice("尚未设置学习项目目录。");
+			else new BlackboardModal(this.app, dir).open();
+		});
 
 		// 页签：群 + 花名册
 		const tabBar = root.createDiv({ cls: "pi-learning-tabs" });
