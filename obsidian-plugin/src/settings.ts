@@ -96,7 +96,7 @@ export class PiLearningSettingTab extends PluginSettingTab {
 			const c = manager.get(role);
 			new Setting(containerEl)
 				.setName("实例")
-				.setDesc(`当前角色：${spec ? `${spec.glyph} ${spec.label}` : role} · ${c.running ? "运行中" : "未启动"}。选模型、登录供应商都需要实例在运行（未运行时会自动拉起）。`)
+				.setDesc(`当前角色：${spec?.label ?? role} · ${c.running ? "运行中" : "未启动"}。选模型、登录供应商都需要实例在运行（未运行时会自动拉起）。`)
 				.addButton((b) =>
 					b
 						.setButtonText(c.running ? "重启当前实例" : "启动当前实例")
@@ -132,12 +132,18 @@ export class PiLearningSettingTab extends PluginSettingTab {
 					}),
 			)
 			.addButton((b) =>
-				b.setButtonText("从列表选择").onClick(() => {
-					void this.plugin.manager
-						.get(this.plugin.manager.activeRole)
-						.pickModel()
-						.then(() => this.display())
-						.catch((e: Error) => new Notice(e.message));
+				b.setButtonText("从列表选择").onClick(async () => {
+					try {
+						const v = await this.plugin.manager.get(this.plugin.manager.activeRole).pickModelValue();
+						if (v) {
+							s.model = v;
+							save();
+							new Notice(`默认模型已设为 ${v}；未单独配置的角色自下次启动实例起生效。`);
+						}
+					} catch (e) {
+						new Notice((e as Error).message, 8000);
+					}
+					this.display();
 				}),
 			);
 		new Setting(containerEl)
@@ -145,17 +151,37 @@ export class PiLearningSettingTab extends PluginSettingTab {
 			.setDesc("按角色覆盖默认模型；留空即跟随默认。在面板顶栏切模型只会记到当前角色名下，不影响其他角色。优先级：角色模型 > 项目 .pi/learning.json > 默认模型。")
 			.setHeading();
 		for (const spec of ROSTER) {
-			new Setting(containerEl).setName(`${spec.glyph} ${spec.label}`).addText((t) =>
-				t
-					.setPlaceholder("跟随默认")
-					.setValue(s.roleModels[spec.role] ?? "")
-					.onChange((v) => {
-						const trimmed = v.trim();
-						if (trimmed) s.roleModels[spec.role] = trimmed;
-						else delete s.roleModels[spec.role];
-						save();
+			new Setting(containerEl)
+				.setName(spec.label)
+				.addText((t) =>
+					t
+						.setPlaceholder("跟随默认")
+						.setValue(s.roleModels[spec.role] ?? "")
+						.onChange((v) => {
+							const trimmed = v.trim();
+							if (trimmed) s.roleModels[spec.role] = trimmed;
+							else delete s.roleModels[spec.role];
+							save();
+						}),
+				)
+				.addButton((b) =>
+					b.setButtonText("选择").onClick(async () => {
+						try {
+							// 借当前活跃实例跑选择流程（可用模型列表全局一致），结果只写到本行的角色
+							const v = await this.plugin.manager.get(this.plugin.manager.activeRole).pickModelValue();
+							if (v) {
+								s.roleModels[spec.role] = v;
+								save();
+								const c = this.plugin.manager.get(spec.role);
+								if (c.running) await c.applyPreferredModel();
+								new Notice(`【${spec.label}】的模型已设为 ${v}${c.running ? "，已生效" : "，启动实例时生效"}。`);
+							}
+						} catch (e) {
+							new Notice((e as Error).message, 8000);
+						}
+						this.display();
 					}),
-			);
+				);
 		}
 		new Setting(containerEl).setName("额外参数").setDesc("追加给 pi 的命令行参数，例如 --thinking high。").addText((t) =>
 			t.setValue(s.extraArgs).onChange((v) => {

@@ -136,7 +136,7 @@ export class LearningController {
 	}
 
 	/** 当前模型与角色偏好不一致时切换过去；模型不可用（未登录该供应商等）则保持现状 */
-	private async applyPreferredModel(): Promise<void> {
+	async applyPreferredModel(): Promise<void> {
 		const pref = this.settings().roleModels?.[this.spec.role]?.trim();
 		const client = this.client;
 		if (!pref || !client?.running) return;
@@ -271,10 +271,11 @@ export class LearningController {
 
 	/**
 	 * 两级模型选择：先供应商（含未登录的，选中即走官方登录流程），再模型。
-	 * 选中记到本角色的设置里；登录成功则重启本实例加载新凭据后接着选。
+	 * 只负责「选出一个值」（"provider/id"），不改实例模型、不写设置——写到哪由调用方定
+	 * （顶栏 → 当前角色；设置页默认模型 → 全局；各角色模型行 → 对应角色）。
+	 * 实例未运行会先拉起（可用模型列表来自 RPC）；登录成功则重启加载新凭据后接着选。
 	 */
-	async pickModel(): Promise<void> {
-		// 设置页等入口可能在实例未运行时调用：先拉起实例，可用模型列表来自 RPC
+	async pickModelValue(): Promise<string | undefined> {
 		if (!this.client?.running) {
 			new Notice(`【${this.spec.label}】未运行，正在启动…`);
 			await this.start();
@@ -284,16 +285,24 @@ export class LearningController {
 		const s = this.settings();
 		const auth = PiAuth.load(locatePi(s.piPath, s.nodePath || "node", s.projectDir?.trim() || undefined));
 		const r = await pickProviderModel(this.app, { available: models, auth });
-		if (!r) return;
+		if (!r) return undefined;
 		if (r.kind === "logged_in") {
 			new Notice(`已登录 ${r.provider}，正在重启【${this.spec.label}】以加载新凭据…`);
 			await this.start();
-			return this.pickModel();
+			return this.pickModelValue();
 		}
-		await client.setModel(r.provider, r.id);
-		this.onModelChosen?.(this.spec.role, `${r.provider}/${r.id}`);
+		return `${r.provider}/${r.id}`;
+	}
+
+	/** 顶栏入口：选中即切换本实例的模型，并记到本角色的设置里 */
+	async pickModel(): Promise<void> {
+		const v = await this.pickModelValue();
+		if (!v) return;
+		const idx = v.indexOf("/");
+		await this.requireClient().setModel(v.slice(0, idx), v.slice(idx + 1));
+		this.onModelChosen?.(this.spec.role, v);
 		await this.refreshState();
-		new Notice(`已为【${this.spec.label}】切换到 ${r.provider}/${r.id}`);
+		new Notice(`已为【${this.spec.label}】切换到 ${v}`);
 	}
 
 	/** 弹出当前模型支持的思考等级 */
