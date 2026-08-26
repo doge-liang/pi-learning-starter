@@ -47,6 +47,8 @@ export class LearningController {
 	private surface: ControllerSurface | null = null;
 	private starting: Promise<void> | null = null;
 	private refreshing = false;
+	/** 强制重载撞上进行中的刷新时排队补刷，而不是丢弃（否则新会话后页签可能不刷新） */
+	private forceReloadQueued = false;
 
 	constructor(
 		private app: App,
@@ -364,7 +366,12 @@ export class LearningController {
 	/** 拉取 get_state；sessionFile 变化时通知视图重载历史 */
 	async refreshState(forceReload = false): Promise<void> {
 		const client = this.client;
-		if (!client?.running || this.refreshing) return;
+		if (!client?.running) return;
+		if (this.refreshing) {
+			// 并发的事件刷新可能读到的还是旧会话，对比不出变化；强制重载必须补做
+			if (forceReload) this.forceReloadQueued = true;
+			return;
+		}
 		this.refreshing = true;
 		try {
 			const prev = this.state;
@@ -384,6 +391,10 @@ export class LearningController {
 			this.lastError = (e as Error).message;
 		} finally {
 			this.refreshing = false;
+			if (this.forceReloadQueued) {
+				this.forceReloadQueued = false;
+				void this.refreshState(true);
+			}
 		}
 	}
 
