@@ -55,10 +55,11 @@ describe("常驻实例（hub）模式", () => {
 			const r = await pi.emit("before_agent_start", { systemPrompt: "BASE", messages: [] }, ctx);
 			assert.ok(r?.systemPrompt.includes("常驻实例模式"));
 
-			// 跨角色：提示 @ 对应实例，不 newSession，角色不变
+			// 跨角色：提示 @ 对应实例并把寻址预填进输入框，不 newSession，角色不变
 			ctx.notices.length = 0;
 			await pi.command("go").handler("assess", ctx);
 			assert.ok(ctx.notices.some(([, m]) => m.includes("@复盘老师")));
+			assert.ok(ctx.editorTexts.some((t) => t.startsWith("@复盘老师")), "寻址应预填进输入框");
 			assert.equal(newSessions, 0);
 			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.tutor.tools]);
 
@@ -69,11 +70,20 @@ describe("常驻实例（hub）模式", () => {
 			assert.match(pi.lastMessage(), /\[begin-session\]/);
 			assert.equal(lastState(pi).unit, "u02");
 
-			// bb_route_ask 跨角色：返回 @ 指引文本，不弹选择框
-			const before = ctx.selects.length;
+			// bb_route_ask 跨角色：选项保留（标注转 @），选中后预填寻址而非派发。
+			// 选项文字由 renderRoute 拼装，测试先以「稍后」捕获真实文字，再选中跨角色项
+			uiScript.select.push("稍后再说");
+			await pi.tool("bb_route_ask").execute("t", { routes: ["assess"] }, undefined, undefined, ctx);
+			const [, askOptions] = ctx.selects.at(-1)!;
+			const crossOption = askOptions.find((o) => o.includes("转 @复盘老师"));
+			assert.ok(crossOption, "跨角色选项保留且标注去向");
+			ctx.editorTexts.length = 0;
+			pi.sentMessages.length = 0;
+			uiScript.select.push(crossOption);
 			const ask = await pi.tool("bb_route_ask").execute("t", { routes: ["assess"] }, undefined, undefined, ctx);
 			assert.match(ask.content[0].text, /@复盘老师/);
-			assert.equal(ctx.selects.length, before, "跨角色路由不应弹框");
+			assert.ok(ctx.editorTexts.some((t) => t.startsWith("@复盘老师 ")), "选中后预填寻址");
+			assert.equal(pi.sentMessages.length, 0, "跨角色不派发 /go");
 
 			// 常驻实例不支持退出学习模式
 			ctx.notices.length = 0;
@@ -131,7 +141,7 @@ describe("常驻实例（hub）模式", () => {
 		}
 	});
 
-	it("尾部询问过滤跨角色选项：规划提案只剩「接受」，跨角色以 @ 提示返回给模型", async () => {
+	it("尾部询问保留跨角色选项并标注去向：规划提案的「送评审」标注转 @提案评审员", async () => {
 		process.env.LEARN_HUB = "1";
 		process.env.LEARN_ROLE = "planner";
 		try {
@@ -153,9 +163,10 @@ describe("常驻实例（hub）模式", () => {
 				undefined,
 				ctx,
 			);
-			assert.match(r.content[0].text, /@提案评审员/, "被过滤的送评审选项转为 @ 提示");
+			assert.match(r.content[0].text, /稍后处理/);
 			const [, options] = ctx.selects.at(-1)!;
-			assert.deepEqual(options, ["审阅并接受（弹出摘要确认）", "稍后再说"], "选择框只剩角色无关的选项");
+			assert.ok(options.includes("审阅并接受（弹出摘要确认）"), "角色无关选项照常");
+			assert.ok(options.some((o) => o.includes("转 @提案评审员")), "跨角色选项保留且标注去向");
 		} finally {
 			delete process.env.LEARN_HUB;
 			delete process.env.LEARN_ROLE;

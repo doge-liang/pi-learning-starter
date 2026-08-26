@@ -70,33 +70,40 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
 		return ROLES[role].label.split("（")[0];
 	}
 
+	/** hub 下该路由属于别的角色实例则返回目标角色；否则 null（可本地派发） */
+	function crossTarget(route: string): Role | null {
+		if (!hubMode()) return null;
+		const t = targetRoleOfRoute(bb, route);
+		return t !== null && t !== deps.state().role ? (t as Role) : null;
+	}
+
 	/**
 	 * 尾部询问：向学习者弹一次选择框，选定的路由派发给 /go 执行。
 	 * 选项文字由调用处的代码拼装；永远附带「稍后再说」。返回给模型的是学习者的选择结果。
-	 * 常驻实例（hub）模式下过滤掉跨角色的选项，改为提示学习者用 @ 唤醒对应实例。
+	 * 常驻实例（hub）模式下跨角色的选项保留但不派发：选中后把 @角色 寻址预填进
+	 * 输入框，学习者回车即发——护栏不变（本实例绝不代替别的实例发言）。
 	 */
 	async function askNext(ctx: ExtensionContext, title: string, options: Array<{ label: string; route: string }>): Promise<string> {
-		let opts = options;
-		let hint = "";
-		if (hubMode()) {
-			const role = deps.state().role;
-			const dropped = options.filter((o) => {
-				const t = targetRoleOfRoute(bb, o.route);
-				return t !== null && t !== role;
-			});
-			opts = options.filter((o) => !dropped.includes(o));
-			if (dropped.length) {
-				hint = `\n跨角色的下一步请让学习者用 @ 唤醒对应实例：${dropped.map((o) => `@${shortLabel(targetRoleOfRoute(bb, o.route) as Role)}（${o.label}）`).join("；")}。`;
-			}
+		if (!ctx.hasUI || !options.length) {
+			const cross = options.filter((o) => crossTarget(o.route));
+			return cross.length ? `\n跨角色的下一步请让学习者用 @ 唤醒对应实例：${cross.map((o) => `@${shortLabel(crossTarget(o.route) as Role)}（${o.label}）`).join("；")}。` : "";
 		}
-		if (!ctx.hasUI || !opts.length) return hint;
-		const labels = opts.map((o) => o.label);
+		const labels = options.map((o) => {
+			const t = crossTarget(o.route);
+			return t ? `${o.label} → 转 @${shortLabel(t)}` : o.label;
+		});
 		const pick = await ctx.ui.select(title, [...labels, LATER]);
-		if (!pick || pick === LATER) return `\n学习者选择稍后处理；不要催促。${hint}`;
-		const chosen = opts[labels.indexOf(pick)];
+		if (!pick || pick === LATER) return "\n学习者选择稍后处理；不要催促。";
+		const chosen = options[labels.indexOf(pick)];
+		if (!chosen) return "\n学习者的选择无法识别；不要重试。";
+		const t = crossTarget(chosen.route);
+		if (t) {
+			ctx.ui.setEditorText(`@${shortLabel(t)} ${chosen.label}`);
+			return `\n学习者选择：${chosen.label}，目标是 @${shortLabel(t)} 实例。寻址消息已预填进输入框，请学习者回车发送即可；不要代发、不要重复解释怎么 @。`;
+		}
 		// followUp：排到当前回合结束后再执行，避免会话切换把正在收尾的回合掐断
 		pi.sendUserMessage(`/go ${chosen.route}`, { deliverAs: "followUp", expandPromptTemplates: true });
-		return `\n学习者选择：${pick}。已派发，将在本回合结束后执行。${hint}`;
+		return `\n学习者选择：${pick}。已派发，将在本回合结束后执行。`;
 	}
 
 	// ------------------------------------------------------------------ 通用
@@ -130,18 +137,11 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
 			if (bad.length) {
 				return text(`这些路由无效或目标不存在：${bad.map((b) => b.route).join("；")}。可用动作：${ROUTE_ACTIONS.join(", ")}。请修正后重试。`);
 			}
-			if (hubMode()) {
-				const cross = rendered.filter((r) => {
-					const t = targetRoleOfRoute(bb, r.route);
-					return t !== null && t !== state.role;
-				});
-				if (cross.length) {
-					return text(
-						`常驻实例模式下不切换角色。请告诉学习者用 @ 唤醒对应实例：${cross.map((c) => `@${shortLabel(targetRoleOfRoute(bb, c.route) as Role)}（${c.label}）`).join("；")}。本工具只用于角色无关的动作（accept / take / collect / verify / library / reflect / artifact / exemplar / gloss）或本角色内的路由。`,
-					);
-				}
-			}
-			const labels = rendered.map((r) => r.label as string);
+			// hub：跨角色路由保留在选择框里，选中后预填 @ 寻址而非派发（本实例不代替别的实例发言）
+			const labels = rendered.map((r) => {
+				const t = crossTarget(r.route);
+				return t ? `${r.label} → 转 @${shortLabel(t)}` : (r.label as string);
+			});
 			const pick = await ctx.ui.select("接下来做什么？", [...labels, LATER]);
 			if (!pick || pick === LATER) {
 				const snoozed = new Set(state.snoozed ?? []);
@@ -151,7 +151,14 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
 				deps.persist();
 				return text("学习者选择稍后。不要再主动重提这些建议；学习者自己提起时再处理。");
 			}
-			pi.sendUserMessage(`/go ${rendered[labels.indexOf(pick)].route}`, { deliverAs: "followUp", expandPromptTemplates: true });
+			const chosen = rendered[labels.indexOf(pick)];
+			if (!chosen) return text("学习者的选择无法识别；请重新调用。");
+			const target = crossTarget(chosen.route);
+			if (target) {
+				ctx.ui.setEditorText(`@${shortLabel(target)} ${chosen.label}`);
+				return text(`学习者选择：${chosen.label}，目标是 @${shortLabel(target)} 实例。寻址消息已预填进输入框，请学习者回车发送即可；不要代发、不要重复解释怎么 @。`);
+			}
+			pi.sendUserMessage(`/go ${chosen.route}`, { deliverAs: "followUp", expandPromptTemplates: true });
 			return text(`学习者选择：${pick}。已派发，将在本回合结束后执行；本轮不需要你再推进别的。`);
 		},
 	});

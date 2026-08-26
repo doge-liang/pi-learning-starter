@@ -43,7 +43,9 @@ export function registerCommands(pi: ExtensionAPI, deps: CommandDeps): void {
 		if (hubMode()) {
 			const current = deps.state().role;
 			if (current && current !== role) {
-				return ctx.ui.notify(`常驻实例模式下不切换角色：请用 @${ROLES[role].label.split("（")[0]} 唤醒对应实例。`, "warning");
+				const label = ROLES[role].label.split("（")[0];
+				ctx.ui.setEditorText(`@${label} `);
+				return ctx.ui.notify(`常驻实例模式下不切换角色：已在输入框填好 @${label}，补一句话回车即可唤醒。`, "warning");
 			}
 			await deps.applyRole(role, partial, undefined, ctx);
 			pi.sendUserMessage(kick);
