@@ -274,6 +274,11 @@ export class LearningController {
 	 * 选中记到本角色的设置里；登录成功则重启本实例加载新凭据后接着选。
 	 */
 	async pickModel(): Promise<void> {
+		// 设置页等入口可能在实例未运行时调用：先拉起实例，可用模型列表来自 RPC
+		if (!this.client?.running) {
+			new Notice(`【${this.spec.label}】未运行，正在启动…`);
+			await this.start();
+		}
 		const client = this.requireClient();
 		const models = (await client.getAvailableModels()) as RpcModel[];
 		const s = this.settings();

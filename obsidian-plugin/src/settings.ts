@@ -89,6 +89,36 @@ export class PiLearningSettingTab extends PluginSettingTab {
 					save();
 				}),
 		);
+		{
+			const manager = this.plugin.manager;
+			const role = manager.activeRole;
+			const spec = ROSTER.find((r) => r.role === role);
+			const c = manager.get(role);
+			new Setting(containerEl)
+				.setName("实例")
+				.setDesc(`当前角色：${spec ? `${spec.glyph} ${spec.label}` : role} · ${c.running ? "运行中" : "未启动"}。选模型、登录供应商都需要实例在运行（未运行时会自动拉起）。`)
+				.addButton((b) =>
+					b
+						.setButtonText(c.running ? "重启当前实例" : "启动当前实例")
+						.setCta()
+						.onClick(async () => {
+							try {
+								await c.start();
+								new Notice(`【${spec?.label ?? role}】已启动。`);
+							} catch (e) {
+								new Notice((e as Error).message, 8000);
+							}
+							this.display();
+						}),
+				)
+				.addButton((b) =>
+					b.setButtonText("停止全部实例").onClick(async () => {
+						await manager.stopAll();
+						new Notice("已停止全部实例。");
+						this.display();
+					}),
+				);
+		}
 		new Setting(containerEl)
 			.setName("默认模型")
 			.setDesc("启动 pi 时的 --model，如 zai-coding-cn/glm-5.2；留空用 pi 的默认模型。未单独配置模型的角色都用它；配置失效时实例会自动回退到可用列表的第一个模型。")
