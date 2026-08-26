@@ -15,6 +15,8 @@ export class InstanceManager {
 	activeRole = "concierge";
 	/** 面板里选了模型时回写到该角色的设置 */
 	onModelChosen: ((role: string, model: string) => void) | null = null;
+	/** 面板里选了思考等级时回写到该角色的设置 */
+	onThinkingChosen: ((role: string, level: string) => void) | null = null;
 
 	private queue: Array<{ role: string; run: () => Promise<void> }> = [];
 	private draining = false;
@@ -52,6 +54,7 @@ export class InstanceManager {
 				},
 			});
 			c.onModelChosen = (r, m) => this.onModelChosen?.(r, m);
+			c.onThinkingChosen = (r, l) => this.onThinkingChosen?.(r, l);
 			this.controllers.set(role, c);
 		}
 		return c;

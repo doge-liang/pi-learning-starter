@@ -104,6 +104,8 @@ describe("TriggerWatcher", () => {
 		nodePath: "",
 		model: "",
 		roleModels: {},
+		thinking: "",
+		roleThinking: {},
 		extraArgs: "",
 		autoStart: false,
 		resumeLast: false,

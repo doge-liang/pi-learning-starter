@@ -23,6 +23,10 @@ export default class PiLearningPlugin extends Plugin {
 			this.settings.roleModels[role] = model;
 			void this.saveSettings();
 		};
+		this.manager.onThinkingChosen = (role, level) => {
+			this.settings.roleThinking[role] = level;
+			void this.saveSettings();
+		};
 		// 自主触发（P3）：常驻轮询，开关与冷却读设置；默认关闭
 		this.watcher = new TriggerWatcher(this.manager, () => this.settings);
 		this.watcher.start();
@@ -57,7 +61,7 @@ export default class PiLearningPlugin extends Plugin {
 
 	async loadSettings(): Promise<void> {
 		const loaded = ((await this.loadData()) ?? {}) as Partial<PiLearningSettings>;
-		this.settings = { ...DEFAULT_SETTINGS, ...loaded, roleSessions: { ...(loaded.roleSessions ?? {}) }, roleModels: { ...(loaded.roleModels ?? {}) }, projectHistory: [...(loaded.projectHistory ?? [])] };
+		this.settings = { ...DEFAULT_SETTINGS, ...loaded, roleSessions: { ...(loaded.roleSessions ?? {}) }, roleModels: { ...(loaded.roleModels ?? {}) }, roleThinking: { ...(loaded.roleThinking ?? {}) }, projectHistory: [...(loaded.projectHistory ?? [])] };
 		if (this.settings.projectDir && !this.settings.projectHistory.includes(this.settings.projectDir)) this.settings.projectHistory.unshift(this.settings.projectDir);
 		// 首次使用：若 vault 根目录本身就是学习项目，直接用它
 		if (!this.settings.projectDir) {

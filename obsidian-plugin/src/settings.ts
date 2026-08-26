@@ -24,6 +24,10 @@ export interface PiLearningSettings {
 	model: string;
 	/** 各角色的模型偏好（provider/model-id）；优先于默认模型与 .pi/learning.json 的项目级配置 */
 	roleModels: Record<string, string>;
+	/** 默认思考等级（off / minimal / low / medium / high / xhigh / max）；空即跟随 pi 默认 */
+	thinking: string;
+	/** 各角色的思考等级偏好；留空跟随默认。实际可用等级依模型而异，不可用时保持现状 */
+	roleThinking: Record<string, string>;
 	/** 其他追加参数，如 --thinking high */
 	extraArgs: string;
 	/** 打开视图时自动启动前台实例 */
@@ -38,6 +42,9 @@ export interface PiLearningSettings {
 	triggerCooldownMinutes: number;
 }
 
+/** pi 的思考等级全集；某模型的实际可用集合经 RPC 查询（get_available_thinking_levels） */
+export const THINKING_LEVELS = ["off", "minimal", "low", "medium", "high", "xhigh", "max"] as const;
+
 export const DEFAULT_SETTINGS: PiLearningSettings = {
 	projectDir: "",
 	projectHistory: [],
@@ -45,6 +52,8 @@ export const DEFAULT_SETTINGS: PiLearningSettings = {
 	nodePath: "",
 	model: "",
 	roleModels: {},
+	thinking: "",
+	roleThinking: {},
 	extraArgs: "",
 	autoStart: true,
 	resumeLast: true,
@@ -176,8 +185,19 @@ export class PiLearningSettingTab extends PluginSettingTab {
 				}),
 			);
 		new Setting(containerEl)
-			.setName("各角色模型")
-			.setDesc("按角色覆盖默认模型；留空即跟随默认。在面板顶栏切模型只会记到当前角色名下，不影响其他角色。优先级：角色模型 > 项目 .pi/learning.json > 默认模型。")
+			.setName("默认思考等级")
+			.setDesc("未单独配置的角色都用它；实际可用等级依模型而异，模型不支持时保持其现状。面板顶栏的「思考等级」按钮只改当前角色。")
+			.addDropdown((d) => {
+				d.addOption("", "跟随 pi 默认");
+				for (const l of THINKING_LEVELS) d.addOption(l, l);
+				d.setValue(s.thinking).onChange((v) => {
+					s.thinking = v;
+					save();
+				});
+			});
+		new Setting(containerEl)
+			.setName("各角色模型与思考")
+			.setDesc("按角色覆盖默认模型与思考等级；留空即跟随默认。在面板顶栏切模型 / 思考只会记到当前角色名下，不影响其他角色。模型优先级：角色模型 > 项目 .pi/learning.json > 默认模型。")
 			.setHeading();
 		for (const spec of ROSTER) {
 			new Setting(containerEl)
@@ -210,7 +230,18 @@ export class PiLearningSettingTab extends PluginSettingTab {
 						}
 						this.display();
 					}),
-				);
+				)
+				.addDropdown((d) => {
+					d.addOption("", "思考：跟随默认");
+					for (const l of THINKING_LEVELS) d.addOption(l, `思考：${l}`);
+					d.setValue(s.roleThinking[spec.role] ?? "").onChange(async (v) => {
+						if (v) s.roleThinking[spec.role] = v;
+						else delete s.roleThinking[spec.role];
+						save();
+						const c = this.plugin.manager.get(spec.role);
+						if (c.running) await c.applyPreferredThinking();
+					});
+				});
 		}
 		new Setting(containerEl).setName("额外参数").setDesc("追加给 pi 的命令行参数，例如 --thinking high。").addText((t) =>
 			t.setValue(s.extraArgs).onChange((v) => {

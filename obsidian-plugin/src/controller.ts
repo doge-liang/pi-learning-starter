@@ -87,6 +87,8 @@ export class LearningController {
 		const args = ["-a", ...(s.extraArgs ? splitArgs(s.extraArgs) : [])];
 		const preferred = this.preferredModel();
 		if (preferred) args.push("--model", preferred);
+		const thinking = this.preferredThinking();
+		if (thinking) args.push("--thinking", thinking);
 		const client = new PiRpcClient({
 			command: launch.command,
 			commandArgs: launch.args,
@@ -129,6 +131,28 @@ export class LearningController {
 		// 会话建立时扩展可能按 .pi/learning.json 设过模型；学习者的角色级选择优先，最后校准一次
 		await this.applyPreferredModel();
 		await this.fallbackIfNoModel();
+		await this.applyPreferredThinking();
+	}
+
+	/** 本角色的思考等级偏好：角色 > 全局默认；空串视为未配置 */
+	private preferredThinking(): string {
+		const s = this.settings();
+		return (s.roleThinking?.[this.spec.role] ?? s.thinking ?? "").trim();
+	}
+
+	/** 当前思考等级与偏好不一致时切换过去；当前模型不支持该等级则保持现状 */
+	async applyPreferredThinking(): Promise<void> {
+		const pref = this.preferredThinking();
+		const client = this.client;
+		if (!pref || !client?.running || this.state?.thinkingLevel === pref) return;
+		try {
+			const levels = await client.getAvailableThinkingLevels();
+			if (!levels.includes(pref)) return;
+			await client.setThinkingLevel(pref);
+			await this.refreshState();
+		} catch {
+			/* 等级不可用则保持现状 */
+		}
 	}
 
 	/** 本角色的模型偏好：角色模型 > 全局默认；空串视为未配置 */
@@ -228,6 +252,7 @@ export class LearningController {
 		if (r.cancelled) new Notice("会话切换被取消。");
 		await this.refreshState(true);
 		await this.applyPreferredModel();
+		await this.applyPreferredThinking();
 	}
 
 	async loadHistory(): Promise<AgentMessage[]> {
@@ -269,6 +294,7 @@ export class LearningController {
 		this.statuses.clear();
 		await this.refreshState(true);
 		await this.applyPreferredModel();
+		await this.applyPreferredThinking();
 	}
 
 	/**
@@ -307,7 +333,7 @@ export class LearningController {
 		new Notice(`已为【${this.spec.label}】切换到 ${v}`);
 	}
 
-	/** 弹出当前模型支持的思考等级 */
+	/** 弹出当前模型支持的思考等级；选中记到本角色的设置里，下次启动沿用 */
 	async pickThinkingLevel(): Promise<void> {
 		const client = this.requireClient();
 		const levels = await client.getAvailableThinkingLevels();
@@ -315,14 +341,18 @@ export class LearningController {
 			new Notice("当前模型不支持调节思考等级。");
 			return;
 		}
-		const picked = await selectModal(this.app, `思考等级（当前：${this.state?.thinkingLevel ?? "?"}）`, levels);
+		const picked = await selectModal(this.app, `【${this.spec.label}】思考等级（当前：${this.state?.thinkingLevel ?? "?"}）`, levels);
 		if (!picked) return;
 		await client.setThinkingLevel(picked);
+		this.onThinkingChosen?.(this.spec.role, picked);
 		await this.refreshState();
+		new Notice(`已为【${this.spec.label}】把思考等级设为 ${picked}`);
 	}
 
 	/** 由插件注入：把用户在面板里选的模型写回本角色的设置 */
 	onModelChosen: ((role: string, model: string) => void) | null = null;
+	/** 由插件注入：把用户在面板里选的思考等级写回本角色的设置 */
+	onThinkingChosen: ((role: string, level: string) => void) | null = null;
 
 	private requireClient(): PiRpcClient {
 		if (!this.client?.running) throw new Error("pi 未运行；请先启动。");
