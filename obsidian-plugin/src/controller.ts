@@ -83,7 +83,8 @@ export class LearningController {
 		if (!launch) throw new Error("找不到 pi：请全局安装 @earendil-works/pi-coding-agent，或在设置里填写 pi 的 dist/cli.js 路径。");
 		this.launchSource = launch.source;
 		const args = ["-a", ...(s.extraArgs ? splitArgs(s.extraArgs) : [])];
-		if (s.model?.trim()) args.push("--model", s.model.trim());
+		const preferred = this.preferredModel();
+		if (preferred) args.push("--model", preferred);
 		const client = new PiRpcClient({
 			command: launch.command,
 			commandArgs: launch.args,
@@ -120,6 +121,48 @@ export class LearningController {
 			} catch {
 				/* 命名失败不影响使用 */
 			}
+		}
+		// 会话建立时扩展可能按 .pi/learning.json 设过模型；学习者的角色级选择优先，最后校准一次
+		await this.applyPreferredModel();
+		await this.fallbackIfNoModel();
+	}
+
+	/** 本角色的模型偏好：角色模型 > 全局默认；空串视为未配置 */
+	private preferredModel(): string {
+		const s = this.settings();
+		return (s.roleModels?.[this.spec.role] ?? s.model ?? "").trim();
+	}
+
+	/** 当前模型与角色偏好不一致时切换过去；模型不可用（未登录该供应商等）则保持现状 */
+	private async applyPreferredModel(): Promise<void> {
+		const pref = this.settings().roleModels?.[this.spec.role]?.trim();
+		const client = this.client;
+		if (!pref || !client?.running) return;
+		const cur = this.state?.model ? `${this.state.model.provider}/${this.state.model.id}` : "";
+		if (cur === pref) return;
+		const idx = pref.indexOf("/");
+		if (idx <= 0) return;
+		try {
+			await client.setModel(pref.slice(0, idx), pref.slice(idx + 1));
+			await this.refreshState();
+		} catch {
+			this.surface?.onSystem(`角色模型 ${pref} 不可用，沿用 ${cur || "pi 默认"}。`, "warning");
+		}
+	}
+
+	/** 配置的模型失效（供应商无凭据、模型下线）时自动回退到可用列表的第一个，避免实例瘫在「无可用模型」 */
+	private async fallbackIfNoModel(): Promise<void> {
+		const client = this.client;
+		if (!client?.running || this.state?.model) return;
+		try {
+			const models = await client.getAvailableModels();
+			const m = models[0];
+			if (!m) return;
+			await client.setModel(m.provider, m.id);
+			await this.refreshState();
+			this.surface?.onSystem(`配置的模型不可用，已回退到 ${m.provider}/${m.id}。可在顶栏或设置里改选。`, "warning");
+		} catch {
+			/* 连模型列表都取不到：保持无模型状态，顶栏会提示 */
 		}
 	}
 
@@ -180,6 +223,7 @@ export class LearningController {
 		const r = await this.requireClient().newSession();
 		if (r.cancelled) new Notice("会话切换被取消。");
 		await this.refreshState(true);
+		await this.applyPreferredModel();
 	}
 
 	async loadHistory(): Promise<AgentMessage[]> {
@@ -220,9 +264,10 @@ export class LearningController {
 		}
 		this.statuses.clear();
 		await this.refreshState(true);
+		await this.applyPreferredModel();
 	}
 
-	/** 弹出可用模型列表，选中即切换；记到设置里，下次启动沿用 */
+	/** 弹出可用模型列表，选中即切换；记到本角色的设置里，下次启动沿用 */
 	async pickModel(): Promise<void> {
 		const client = this.requireClient();
 		const models = await client.getAvailableModels();
@@ -237,9 +282,9 @@ export class LearningController {
 		const m = models[labels.indexOf(picked)];
 		if (!m) return;
 		await client.setModel(m.provider, m.id);
-		this.onModelChosen?.(`${m.provider}/${m.id}`);
+		this.onModelChosen?.(this.spec.role, `${m.provider}/${m.id}`);
 		await this.refreshState();
-		new Notice(`已切换到 ${m.provider}/${m.id}`);
+		new Notice(`已为【${this.spec.label}】切换到 ${m.provider}/${m.id}`);
 	}
 
 	/** 弹出当前模型支持的思考等级 */
@@ -256,8 +301,8 @@ export class LearningController {
 		await this.refreshState();
 	}
 
-	/** 由插件注入：把用户在面板里选的模型写回设置 */
-	onModelChosen: ((model: string) => void) | null = null;
+	/** 由插件注入：把用户在面板里选的模型写回本角色的设置 */
+	onModelChosen: ((role: string, model: string) => void) | null = null;
 
 	private requireClient(): PiRpcClient {
 		if (!this.client?.running) throw new Error("pi 未运行；请先启动。");

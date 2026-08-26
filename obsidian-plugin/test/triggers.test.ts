@@ -102,6 +102,7 @@ describe("TriggerWatcher", () => {
 		piPath: "",
 		nodePath: "",
 		model: "",
+		roleModels: {},
 		extraArgs: "",
 		autoStart: false,
 		resumeLast: false,

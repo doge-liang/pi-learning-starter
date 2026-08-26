@@ -13,8 +13,8 @@ export class InstanceManager {
 	private controllers = new Map<string, LearningController>();
 	/** 当前活跃页签的角色；无 @ 的消息路由到它 */
 	activeRole = "concierge";
-	/** 面板里选了模型时回写设置（沿用单实例时代的行为） */
-	onModelChosen: ((model: string) => void) | null = null;
+	/** 面板里选了模型时回写到该角色的设置 */
+	onModelChosen: ((role: string, model: string) => void) | null = null;
 
 	private queue: Array<{ role: string; run: () => Promise<void> }> = [];
 	private draining = false;
@@ -51,7 +51,7 @@ export class InstanceManager {
 					this.persist();
 				},
 			});
-			c.onModelChosen = (m) => this.onModelChosen?.(m);
+			c.onModelChosen = (r, m) => this.onModelChosen?.(r, m);
 			this.controllers.set(role, c);
 		}
 		return c;

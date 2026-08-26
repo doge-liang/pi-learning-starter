@@ -4,6 +4,7 @@
  */
 import { type App, Notice, PluginSettingTab, Setting } from "obsidian";
 import type PiLearningPlugin from "./main.ts";
+import { ROSTER } from "./roster.ts";
 
 export interface PiLearningSettings {
 	/** 含 .pi/extensions/learning 与 blackboard/ 的目录；留空则在首次打开时尝试用 vault 根目录 */
@@ -14,6 +15,8 @@ export interface PiLearningSettings {
 	nodePath: string;
 	/** 启动时传给 pi 的 --model，如 deepseek/deepseek-v4-pro；留空沿用 pi 默认 */
 	model: string;
+	/** 各角色的模型偏好（provider/model-id）；优先于默认模型与 .pi/learning.json 的项目级配置 */
+	roleModels: Record<string, string>;
 	/** 其他追加参数，如 --thinking high */
 	extraArgs: string;
 	/** 打开视图时自动启动前台实例 */
@@ -33,6 +36,7 @@ export const DEFAULT_SETTINGS: PiLearningSettings = {
 	piPath: "",
 	nodePath: "",
 	model: "",
+	roleModels: {},
 	extraArgs: "",
 	autoStart: true,
 	resumeLast: true,
@@ -83,8 +87,8 @@ export class PiLearningSettingTab extends PluginSettingTab {
 				}),
 		);
 		new Setting(containerEl)
-			.setName("模型")
-			.setDesc("启动 pi 时的 --model，如 zai-coding-cn/glm-5.2；留空用 pi 的默认模型。面板顶栏点模型名也可随时切换（会写回这里）。各角色的模型仍可在项目的 .pi/learning.json 里分别配置。")
+			.setName("默认模型")
+			.setDesc("启动 pi 时的 --model，如 zai-coding-cn/glm-5.2；留空用 pi 的默认模型。未单独配置模型的角色都用它；配置失效时实例会自动回退到可用列表的第一个模型。")
 			.addText((t) =>
 				t
 					.setPlaceholder("provider/model-id")
@@ -103,6 +107,23 @@ export class PiLearningSettingTab extends PluginSettingTab {
 						.catch((e: Error) => new Notice(e.message));
 				}),
 			);
+		new Setting(containerEl)
+			.setName("各角色模型")
+			.setDesc("按角色覆盖默认模型；留空即跟随默认。在面板顶栏切模型只会记到当前角色名下，不影响其他角色。优先级：角色模型 > 项目 .pi/learning.json > 默认模型。")
+			.setHeading();
+		for (const spec of ROSTER) {
+			new Setting(containerEl).setName(`${spec.glyph} ${spec.label}`).addText((t) =>
+				t
+					.setPlaceholder("跟随默认")
+					.setValue(s.roleModels[spec.role] ?? "")
+					.onChange((v) => {
+						const trimmed = v.trim();
+						if (trimmed) s.roleModels[spec.role] = trimmed;
+						else delete s.roleModels[spec.role];
+						save();
+					}),
+			);
+		}
 		new Setting(containerEl).setName("额外参数").setDesc("追加给 pi 的命令行参数，例如 --thinking high。").addText((t) =>
 			t.setValue(s.extraArgs).onChange((v) => {
 				s.extraArgs = v;
