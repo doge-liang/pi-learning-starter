@@ -172,6 +172,14 @@ export class PiRpcClient {
 	async switchSession(sessionPath: string): Promise<{ cancelled: boolean }> {
 		return this.data(await this.send({ type: "switch_session", sessionPath }));
 	}
+	/** 回滚：把根到该用户消息之前的路径抄成新会话线并切换（旧线保留），返回该消息原文供编辑重发 */
+	async fork(entryId: string): Promise<{ text?: string; cancelled: boolean }> {
+		return this.data(await this.send({ type: "fork", entryId }));
+	}
+	/** 当前会话线里可作回滚点的用户消息（含 entryId） */
+	async getForkMessages(): Promise<Array<{ entryId: string; text: string }>> {
+		return this.data<{ messages: Array<{ entryId: string; text: string }> }>(await this.send({ type: "get_fork_messages" })).messages;
+	}
 	async getState(): Promise<RpcState> {
 		return this.data(await this.send({ type: "get_state" }));
 	}

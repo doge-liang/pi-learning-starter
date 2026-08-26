@@ -16,6 +16,8 @@ export interface SessionSummary {
 	modified: Date;
 	messageCount: number;
 	firstMessage: string;
+	/** fork 来源：pi 的 fork 会把根到落点的路径抄成新文件，头部记下旧文件路径；会话树以此连边 */
+	parentSession?: string;
 }
 
 export function agentDir(): string {
@@ -83,7 +85,54 @@ export function summarize(path: string, content: string, modified: Date): Sessio
 		modified,
 		messageCount,
 		firstMessage,
+		parentSession: typeof header.parentSession === "string" && header.parentSession ? header.parentSession : undefined,
 	};
+}
+
+// ---------- 会话树：按 parentSession 派生关系把会话文件连成森林 ----------
+
+export interface SessionTreeNode {
+	session: SessionSummary;
+	children: SessionTreeNode[];
+}
+
+/**
+ * 构建会话森林：父文件缺失（被删、跨项目）或成环者作根。
+ * 子节点按创建时间升序（分支的先后一目了然），根按子树最近活动降序。
+ */
+export function buildSessionTree(sessions: SessionSummary[]): SessionTreeNode[] {
+	const byPath = new Map<string, SessionTreeNode>();
+	for (const s of sessions) byPath.set(resolve(s.path), { session: s, children: [] });
+	const roots: SessionTreeNode[] = [];
+	for (const node of byPath.values()) {
+		const parent = node.session.parentSession ? byPath.get(resolve(node.session.parentSession)) : undefined;
+		if (parent && parent !== node) parent.children.push(node);
+		else roots.push(node);
+	}
+	// 环（互指等畸形数据）不可达于任何根：提为根，保证每个会话都出现在树里
+	const seen = new Set<SessionTreeNode>();
+	const mark = (n: SessionTreeNode) => {
+		if (seen.has(n)) return;
+		seen.add(n);
+		for (const c of n.children) mark(c);
+	};
+	for (const r of roots) mark(r);
+	for (const node of byPath.values()) {
+		if (!seen.has(node)) {
+			const parent = node.session.parentSession ? byPath.get(resolve(node.session.parentSession)) : undefined;
+			if (parent) parent.children = parent.children.filter((c) => c !== node);
+			roots.push(node);
+			mark(node);
+		}
+	}
+	const newest = (n: SessionTreeNode): number => Math.max(n.session.modified.getTime(), ...n.children.map(newest));
+	const sortRec = (ns: SessionTreeNode[]) => {
+		ns.sort((a, b) => a.session.created.getTime() - b.session.created.getTime());
+		for (const n of ns) sortRec(n.children);
+	};
+	sortRec(roots);
+	roots.sort((a, b) => newest(b) - newest(a));
+	return roots;
 }
 
 function userPreview(content: unknown): string {

@@ -15,6 +15,7 @@ import { ROSTER, type RoleSpec, roleSpec } from "./roster.ts";
 import type { AgentMessage, RpcEvent } from "./rpc/types.ts";
 import { Transcript, contentText } from "./transcript.ts";
 import { BlackboardModal } from "./ui/blackboard-modal.ts";
+import { type InstanceMark, SessionTreeModal } from "./ui/session-tree-modal.ts";
 
 export const VIEW_TYPE = "pi-learning-view";
 const GROUP_TAB = "group";
@@ -99,6 +100,7 @@ export class LearningView extends ItemView {
 		this.iconButton(ctl, "cpu", "切换当前实例的模型", () => void this.safely(() => this.active().pickModel()));
 		this.iconButton(ctl, "brain", "思考等级", () => void this.safely(() => this.active().pickThinkingLevel()));
 		this.iconButton(ctl, "history", "历史会话（当前实例）", () => void this.safely(() => this.active().pickSession()));
+		this.iconButton(ctl, "git-branch", "会话树：查看 fork 分支，点选切换", () => this.openSessionTree());
 		this.iconButton(ctl, "file-plus", "新会话（当前实例）", () => void this.safely(() => this.active().newSession()));
 		this.abortBtn = this.iconButton(ctl, "square", "中止当前实例的回合", () => void this.safely(() => this.active().abort()));
 		this.iconButton(ctl, "refresh-cw", "重新加载当前页签的记录", () => void this.reloadActive());
@@ -158,15 +160,10 @@ export class LearningView extends ItemView {
 				tab.container,
 				() => controller.statuses.get("learning")?.split(" · ")[0] ?? spec.label,
 				badgeByLabel,
-				// 失败重试 / 重新生成 / 原样重发：把用户输入按正常路径重新派发（入队、回显、群转写）
-				(text) => this.manager.dispatch(spec.role, text),
-				// 编辑重发：填回输入框（按钮在本页签里，收件人即本角色），修改后正常发送
-				(text) => {
-					this.inputEl.value = text;
-					this.inputEl.focus();
-					this.inputEl.setSelectionRange(text.length, text.length);
-					this.updateMention();
-				},
+				// 失败重试 / 重新生成 / 原样重发：优先回滚（fork）到触发消息之前再发，旧线保留于会话树
+				(text) => void this.safely(() => this.resendWithRewind(spec.role, text)),
+				// 编辑重发：回滚后把原文填回输入框（按钮在本页签里，收件人即本角色），修改后正常发送
+				(text) => void this.safely(() => this.editWithRewind(spec.role, text)),
 			);
 			this.buildRoleEmptyState(tab.emptyEl, spec);
 			tab.surface = this.makeSurface(spec.role, spec.label, tab.transcript);
@@ -305,6 +302,72 @@ export class LearningView extends ItemView {
 		} catch (e) {
 			(this.tabs.get(this.manager.activeRole) as Tab).transcript.addSystem(`加载历史失败：${(e as Error).message}`, "error");
 		}
+	}
+
+	/** 重发（重试 / 重新生成）：能定位触发消息就先回滚（fork）再发——新回合替换旧位置，旧线留在会话树；否则退回追加式重发 */
+	private async resendWithRewind(role: RoleSpec["role"], text: string): Promise<void> {
+		const c = this.manager.get(role);
+		if (c.running && c.streamingNow) {
+			new Notice("回合进行中，请稍候或先中止。");
+			return;
+		}
+		if (c.running) {
+			const entryId = await c.findForkEntry(text);
+			if (entryId) {
+				const t = await c.rewindBefore(entryId);
+				if (t === undefined) return; // 取消已提示
+				this.manager.dispatch(role, t || text);
+				return;
+			}
+		}
+		this.manager.dispatch(role, text);
+	}
+
+	/** 编辑重发：回滚到该消息之前，把原文填回输入框修改后发送；无法回滚时只做预填（发送即追加） */
+	private async editWithRewind(role: RoleSpec["role"], text: string): Promise<void> {
+		const c = this.manager.get(role);
+		if (c.running && c.streamingNow) {
+			new Notice("回合进行中，请稍候或先中止。");
+			return;
+		}
+		let prefill = text;
+		if (c.running) {
+			const entryId = await c.findForkEntry(text);
+			if (entryId) {
+				const t = await c.rewindBefore(entryId);
+				if (t === undefined) return;
+				prefill = t || text;
+			}
+		}
+		this.inputEl.value = prefill;
+		this.inputEl.focus();
+		this.inputEl.setSelectionRange(prefill.length, prefill.length);
+		this.updateMention();
+	}
+
+	/** 会话树：项目全部会话按 fork 派生关系成树，点选把当前实例切换过去 */
+	private openSessionTree(): void {
+		const dir = this.manager.projectDir();
+		if (!dir) {
+			new Notice("尚未设置学习项目目录。");
+			return;
+		}
+		new SessionTreeModal(
+			this.app,
+			dir,
+			(): InstanceMark[] =>
+				ROSTER.map((spec) => {
+					const c = this.manager.get(spec.role);
+					return { label: spec.label, glyph: spec.glyph, hue: spec.hue, file: c.running ? (c.currentSessionFile ?? undefined) : undefined, active: spec.role === this.manager.activeRole };
+				}),
+			async (path) => {
+				const c = this.active();
+				if (!c.running) throw new Error("当前实例未运行，先用顶栏播放键启动。");
+				if (c.streamingNow) throw new Error("回合进行中，请稍候或先中止。");
+				await c.switchToSession(path);
+			},
+			() => this.tabs.get(this.manager.activeRole)?.label ?? "当前实例",
+		).open();
 	}
 
 	private async sendInput(): Promise<void> {

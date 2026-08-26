@@ -288,7 +288,14 @@ export class LearningController {
 		const target = sessions[labels.indexOf(picked)];
 		if (!target) return;
 		if (resolve(target.path) === current) return;
-		const r = await client.switchSession(target.path);
+		await this.switchToSession(target.path);
+	}
+
+	/** 切到指定会话文件并重载校准（历史会话选择器与会话树共用） */
+	async switchToSession(path: string): Promise<void> {
+		const client = this.requireClient();
+		if (this.state?.sessionFile && resolve(this.state.sessionFile) === resolve(path)) return;
+		const r = await client.switchSession(path);
 		if (r.cancelled) {
 			new Notice("会话切换被取消。");
 			return;
@@ -297,6 +304,43 @@ export class LearningController {
 		await this.refreshState(true);
 		await this.applyPreferredModel();
 		await this.applyPreferredThinking();
+	}
+
+	/** 本实例是否正在流式生成（回滚等操作应避开进行中的回合） */
+	get streamingNow(): boolean {
+		return !!this.state?.isStreaming;
+	}
+
+	/** 当前会话文件（会话树标注实例落点用）；未运行或未知为 null */
+	get currentSessionFile(): string | null {
+		return this.state?.sessionFile ?? null;
+	}
+
+	/** 按原文定位当前会话线上的用户消息条目（重发 / 编辑的回滚点；取最后一个全等匹配） */
+	async findForkEntry(text: string): Promise<string | undefined> {
+		const client = this.client;
+		if (!client?.running) return undefined;
+		const list = await client.getForkMessages();
+		for (let i = list.length - 1; i >= 0; i--) if (list[i].text === text) return list[i].entryId;
+		return undefined;
+	}
+
+	/**
+	 * 回滚到某条用户消息之前：pi 的 fork 把根到落点的路径抄成新会话线并切换，
+	 * 旧线原样保留（会话树里可随时切回）。返回该消息原文；取消返回 undefined。
+	 */
+	async rewindBefore(entryId: string): Promise<string | undefined> {
+		const client = this.requireClient();
+		const r = await client.fork(entryId);
+		if (r.cancelled) {
+			new Notice("回滚被取消。");
+			return undefined;
+		}
+		this.statuses.clear();
+		await this.refreshState(true);
+		await this.applyPreferredModel();
+		await this.applyPreferredThinking();
+		return r.text ?? "";
 	}
 
 	/**
