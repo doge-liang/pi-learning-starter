@@ -83,6 +83,16 @@ export default function (pi: ExtensionAPI) {
 		}
 		// 2. 非交互 / 定时任务：LEARN_ROLE=assessor pi -p -a "..."
 		const envRole = process.env.LEARN_ROLE as Role | undefined;
+		// 常驻实例（hub）：角色固定在实例上，续接到别的角色留下的会话（单实例时代
+		// /go 切换的档案）或残留交接文件时，会话里的旧状态不得改写实例身份
+		if (hubMode() && envRole && ROLE_NAMES.includes(envRole) && state.role !== envRole) {
+			const before = state.role;
+			state.role = envRole;
+			state.contextHash = undefined; // 黑板上下文按归位后的角色重新注入
+			if (before && ctx.hasUI) {
+				ctx.ui.notify(`本实例固定为 ${ROLES[envRole].label}；续接的会话此前属于 ${ROLES[before].label}，已归位。旧对话仍在记录里，需要干净上下文可开新会话。`, "warning");
+			}
+		}
 		if (!state.role && envRole && ROLE_NAMES.includes(envRole)) state.role = envRole;
 
 		if (state.role) {

@@ -96,6 +96,27 @@ describe("常驻实例（hub）模式", () => {
 		}
 	});
 
+	it("续接到别的角色留下的会话：实例身份由 LEARN_ROLE 归位，不被会话旧状态改写", async () => {
+		process.env.LEARN_HUB = "1";
+		process.env.LEARN_ROLE = "tutor";
+		try {
+			const pi = new FakePi();
+			const ctx = makeCtx(pi, { cwd: project.cwd, hasMessages: true });
+			// 会话末尾的状态自称水平测试官（单实例时代 /go 切换留下的档案）
+			pi.entries.push({ type: "custom", customType: "learning-state", data: { role: "placement", mode: "hint", prequestions: [], answers: [], responses: [] }, id: "e0" });
+			learningExtension(pi.api());
+			await pi.emit("session_start", { reason: "startup" }, ctx);
+			assert.deepEqual(pi.activeTools, [...READ_TOOLS, ...ROLES.tutor.tools], "工具白名单按实例的固定角色");
+			assert.equal(lastState(pi).role, "tutor", "归位后的状态已持久化");
+			assert.ok(ctx.notices.some(([level, m]) => level === "warning" && m.includes("归位")), "向学习者说明发生了归位");
+			const r = await pi.emit("before_agent_start", { systemPrompt: "BASE", messages: [] }, ctx);
+			assert.ok(r?.systemPrompt.includes("常驻实例模式"), "系统提示按归位后的角色构建");
+		} finally {
+			delete process.env.LEARN_HUB;
+			delete process.env.LEARN_ROLE;
+		}
+	});
+
 	it("群转写注入：hub 实例的上下文附群转写尾部；自己的发言与被隔离角色除外；坏行容忍", async () => {
 		process.env.LEARN_HUB = "1";
 		process.env.LEARN_ROLE = "tutor";
