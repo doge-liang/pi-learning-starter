@@ -54,6 +54,8 @@ export class Transcript {
 		private roleName?: () => string | undefined,
 		/** 角色名 → 徽章外观；查不到则不画徽章只显示名字 */
 		private badge?: (roleLabel: string) => { hue: number; glyph: string } | undefined,
+		/** 重发一条用户消息（失败回合的「重试」按钮）；未提供则不渲染重试 */
+		private onRetry?: (text: string) => void,
 	) {}
 
 	clear(): void {
@@ -407,7 +409,13 @@ export class Transcript {
 		}
 		if (b.error) {
 			if (!b.errorEl) b.errorEl = b.el.createDiv({ cls: "pi-learning-error" });
-			b.errorEl.setText(`中断：${b.error}`);
+			b.errorEl.empty();
+			b.errorEl.createSpan({ text: `中断：${b.error}` });
+			const retryText = this.onRetry ? this.retryTextFor(b) : undefined;
+			if (retryText) {
+				const btn = b.errorEl.createEl("button", { cls: "pi-learning-retry", text: "重试" });
+				btn.addEventListener("click", () => this.onRetry?.(retryText));
+			}
 		} else if (b.errorEl) {
 			b.errorEl.remove();
 			b.errorEl = undefined;
@@ -469,6 +477,16 @@ export class Transcript {
 			p.el!.open = true;
 			p.autoOpened = true;
 		}
+	}
+
+	/** 触发该助手回合的用户输入：向前找最近的 user / command 块 */
+	private retryTextFor(b: AssistantBlock): string | undefined {
+		for (let i = this.blocks.indexOf(b) - 1; i >= 0; i--) {
+			const prev = this.blocks[i];
+			if (prev.kind === "user" || prev.kind === "command") return prev.text;
+			if (prev.kind === "assistant") return undefined; // 中间隔了别的回合就不猜
+		}
+		return undefined;
 	}
 
 	private isNearBottom(): boolean {

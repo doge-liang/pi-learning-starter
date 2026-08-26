@@ -145,7 +145,15 @@ export class LearningView extends ItemView {
 		for (const spec of ROSTER) {
 			const tab = makeTab(spec.role, spec.label, `@${spec.label} — ${spec.brief}`, spec);
 			const controller = this.manager.get(spec.role);
-			tab.transcript = new Transcript(this.app, this, tab.container, () => controller.statuses.get("learning")?.split(" · ")[0] ?? spec.label, badgeByLabel);
+			tab.transcript = new Transcript(
+				this.app,
+				this,
+				tab.container,
+				() => controller.statuses.get("learning")?.split(" · ")[0] ?? spec.label,
+				badgeByLabel,
+				// 失败回合的重试：把触发它的用户输入按正常路径重新派发（入队、回显、群转写）
+				(text) => this.manager.dispatch(spec.role, text),
+			);
 			this.buildRoleEmptyState(tab.emptyEl, spec);
 			tab.surface = this.makeSurface(spec.role, spec.label, tab.transcript);
 			controller.attach(tab.surface);
