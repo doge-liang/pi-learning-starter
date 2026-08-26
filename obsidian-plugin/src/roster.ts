@@ -9,17 +9,23 @@ export interface RoleSpec {
 	label: string;
 	/** @ 别名（含 label 本身；解析时精确匹配整个记号） */
 	aliases: string[];
+	/** 印章徽章的单字（页签、消息卡片、@ 补全共用；八字互不重复） */
+	glyph: string;
+	/** 身份色相（0-360）；饱和度与亮度由样式按亮暗主题统一调配 */
+	hue: number;
+	/** 一句话职责，用于花名册导览卡与 @ 补全的副标题 */
+	brief: string;
 }
 
 export const ROSTER: RoleSpec[] = [
-	{ role: "concierge", label: "前台", aliases: ["前台", "concierge"] },
-	{ role: "placement", label: "水平测试官", aliases: ["水平测试官", "测试官", "placement"] },
-	{ role: "planner", label: "领域专家", aliases: ["领域专家", "规划者", "规划", "planner"] },
-	{ role: "critic", label: "提案评审员", aliases: ["提案评审员", "critic"] },
-	{ role: "librarian", label: "资料管理员", aliases: ["资料管理员", "馆员", "librarian"] },
-	{ role: "tutor", label: "陪读老师", aliases: ["陪读老师", "老师", "导师", "tutor"] },
-	{ role: "reviewer", label: "评审员", aliases: ["评审员", "reviewer"] },
-	{ role: "assessor", label: "复盘老师", aliases: ["复盘老师", "考评官", "assessor"] },
+	{ role: "concierge", label: "前台", aliases: ["前台", "concierge"], glyph: "前", hue: 215, brief: "日常入口：无从下手就先找它，由它分诊与转介" },
+	{ role: "placement", label: "水平测试官", aliases: ["水平测试官", "测试官", "placement"], glyph: "测", hue: 35, brief: "摸底定位：出题探水平，产出你的能力画像" },
+	{ role: "planner", label: "领域专家", aliases: ["领域专家", "规划者", "规划", "planner"], glyph: "规", hue: 145, brief: "领域建模：设计概念结构与学习路径提案" },
+	{ role: "critic", label: "提案评审员", aliases: ["提案评审员", "critic"], glyph: "核", hue: 355, brief: "独立把关：评审各类提案，结论供你裁决" },
+	{ role: "librarian", label: "资料管理员", aliases: ["资料管理员", "馆员", "librarian"], glyph: "馆", hue: 275, brief: "馆藏事务：找资料、下载入库、登记与维护" },
+	{ role: "tutor", label: "陪读老师", aliases: ["陪读老师", "老师", "导师", "tutor"], glyph: "师", hue: 190, brief: "陪读练习：精读与练习只提示不代答" },
+	{ role: "reviewer", label: "评审员", aliases: ["评审员", "reviewer"], glyph: "评", hue: 315, brief: "产出评审：审你的亲笔产出，给修订意见" },
+	{ role: "assessor", label: "复盘老师", aliases: ["复盘老师", "考评官", "assessor"], glyph: "盘", hue: 75, brief: "认证复盘：闭卷测验、批改校准、主持复盘" },
 ];
 
 export function roleSpec(role: string): RoleSpec | undefined {

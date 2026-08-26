@@ -8,10 +8,11 @@
  */
 import { type App, type Component, MarkdownRenderer } from "obsidian";
 import type { AgentMessage, AssistantDelta, AssistantMessage, CustomMessage, TextContent, ToolResultMessage, UserMessage } from "./rpc/types.ts";
+import { SmoothPlainText } from "./smooth-reveal.ts";
 import { StreamingMarkdown } from "./streaming-markdown.ts";
 
 export type TextPart = { type: "text"; text: string; el?: HTMLElement; md?: StreamingMarkdown };
-export type ThinkingPart = { type: "thinking"; text: string; el?: HTMLDetailsElement; body?: HTMLElement; summary?: HTMLElement };
+export type ThinkingPart = { type: "thinking"; text: string; el?: HTMLDetailsElement; body?: HTMLElement; summary?: HTMLElement; smooth?: SmoothPlainText };
 export type ToolPart = {
 	type: "tool";
 	id: string;
@@ -33,7 +34,7 @@ export type AssistantPart = TextPart | ThinkingPart | ToolPart;
 export type Block =
 	| { kind: "user"; text: string; el?: HTMLElement }
 	| { kind: "command"; text: string; el?: HTMLElement }
-	| { kind: "assistant"; parts: AssistantPart[]; streaming: boolean; role?: string; error?: string; el?: HTMLElement; roleEl?: HTMLElement; bodyEl?: HTMLElement; errorEl?: HTMLElement }
+	| { kind: "assistant"; parts: AssistantPart[]; streaming: boolean; role?: string; error?: string; el?: HTMLElement; roleEl?: HTMLElement; bodyEl?: HTMLElement; errorEl?: HTMLElement; actionsEl?: HTMLElement }
 	| { kind: "note"; text: string; el?: HTMLElement }
 	| { kind: "custom"; customType: string; text: string; el?: HTMLElement }
 	| { kind: "system"; text: string; level: "info" | "warning" | "error"; el?: HTMLElement };
@@ -43,6 +44,8 @@ type AssistantBlock = Extract<Block, { kind: "assistant" }>;
 export class Transcript {
 	blocks: Block[] = [];
 	private current: AssistantBlock | null = null;
+	/** 历史批量重建时关闭进入动画，只有增量新块做淡入 */
+	private animate = true;
 
 	constructor(
 		private app: App,
@@ -50,9 +53,16 @@ export class Transcript {
 		private container: HTMLElement,
 		/** 取当前角色名；消息开始时快照到块上（历史消息不记录角色，重载后无从追溯，故只标注新消息） */
 		private roleName?: () => string | undefined,
+		/** 角色名 → 徽章外观；查不到则不画徽章只显示名字 */
+		private badge?: (roleLabel: string) => { hue: number; glyph: string } | undefined,
+		/** 重发一条用户消息（失败重试 / 重新生成 / 原样重发都走这里）；未提供则不渲染这些按钮 */
+		private onRetry?: (text: string) => void,
+		/** 把消息文本填回输入框供修改后发送；未提供则不渲染「编辑」 */
+		private onEdit?: (text: string) => void,
 	) {}
 
 	clear(): void {
+		for (const b of this.blocks) detachDom(b); // 顺带取消流式揭示的 rAF 循环
 		this.blocks = [];
 		this.current = null;
 		this.container.empty();
@@ -298,9 +308,14 @@ export class Transcript {
 
 	renderAll(): void {
 		this.container.empty();
-		for (const b of this.blocks) {
-			detachDom(b);
-			this.renderBlock(b);
+		this.animate = false;
+		try {
+			for (const b of this.blocks) {
+				detachDom(b);
+				this.renderBlock(b);
+			}
+		} finally {
+			this.animate = true;
 		}
 		this.scrollToBottom();
 	}
@@ -316,10 +331,12 @@ export class Transcript {
 			return;
 		}
 		const stick = this.isNearBottom();
+		const fresh = !b.el;
 		const el = b.el ?? this.container.createDiv();
 		b.el = el;
 		el.empty();
 		el.className = `pi-learning-block pi-learning-${b.kind}`;
+		if (fresh && this.animate) el.addClass("pi-learning-enter");
 		switch (b.kind) {
 			case "user": {
 				// 不显示标题，靠右对齐即可辨识用户消息
@@ -333,10 +350,12 @@ export class Transcript {
 					const body = el.createDiv({ cls: "pi-learning-md pi-learning-user-md markdown-rendered" });
 					void MarkdownRenderer.render(this.app, rest, body, "", this.component);
 				}
+				this.renderUserActions(el, b.text);
 				break;
 			}
 			case "command":
 				el.createSpan({ cls: "pi-learning-command", text: b.text });
+				this.renderUserActions(el, b.text);
 				break;
 			case "system":
 				el.addClass(`pi-learning-system-${b.level}`);
@@ -361,12 +380,22 @@ export class Transcript {
 		const stick = this.isNearBottom();
 		if (!b.el) {
 			b.el = this.container.createDiv({ cls: "pi-learning-block pi-learning-assistant" });
+			if (this.animate) b.el.addClass("pi-learning-enter");
 			b.roleEl = b.el.createDiv({ cls: "pi-learning-role" });
 			b.bodyEl = b.el.createDiv({ cls: "pi-learning-assistant-body" });
 		}
 		b.el.toggleClass("pi-learning-streaming", b.streaming);
 		b.roleEl!.empty();
-		if (b.role) b.roleEl!.createSpan({ text: b.role });
+		if (b.role) {
+			const badge = this.badge?.(b.role);
+			if (badge) {
+				const g = b.roleEl!.createSpan({ cls: "pi-learning-glyph", text: badge.glyph });
+				g.style.setProperty("--pi-role-h", String(badge.hue));
+				b.el.style.setProperty("--pi-role-h", String(badge.hue));
+				b.el.addClass("pi-learning-has-role");
+			}
+			b.roleEl!.createSpan({ cls: "pi-learning-role-name", text: b.role });
+		}
 		if (b.streaming) b.roleEl!.createSpan({ cls: "pi-learning-dots", text: b.role ? " · 生成中" : "生成中" });
 		// 历史消息不记录角色：既无角色也不在生成时整行隐藏
 		b.roleEl!.toggleClass("pi-learning-hidden", !b.role && !b.streaming);
@@ -386,12 +415,47 @@ export class Transcript {
 		}
 		if (b.error) {
 			if (!b.errorEl) b.errorEl = b.el.createDiv({ cls: "pi-learning-error" });
-			b.errorEl.setText(`中断：${b.error}`);
+			b.errorEl.empty();
+			b.errorEl.createSpan({ text: `中断：${b.error}` });
+			const retryText = this.onRetry ? this.retryTextFor(b) : undefined;
+			if (retryText) {
+				const btn = b.errorEl.createEl("button", { cls: "pi-learning-retry", text: "重试" });
+				btn.addEventListener("click", () => this.onRetry?.(retryText));
+			}
 		} else if (b.errorEl) {
 			b.errorEl.remove();
 			b.errorEl = undefined;
 		}
+		// 正常回合的「重新生成」：悬停显现；语义与失败重试一致——重新派发触发它的输入，追加新回合
+		const regenText = this.onRetry && !b.streaming && !b.error ? this.retryTextFor(b) : undefined;
+		if (regenText) {
+			if (!b.actionsEl) b.actionsEl = b.el.createDiv({ cls: "pi-learning-msg-actions" });
+			b.actionsEl.empty();
+			const btn = b.actionsEl.createEl("button", {
+				cls: "pi-learning-msg-action",
+				text: "重新生成",
+				attr: { title: "以触发本回合的输入重新派发（追加新回合，不改写历史）" },
+			});
+			btn.addEventListener("click", () => this.onRetry?.(regenText));
+		} else if (b.actionsEl) {
+			b.actionsEl.remove();
+			b.actionsEl = undefined;
+		}
 		if (stick) this.scrollToBottom();
+	}
+
+	/** 用户 / 命令消息的悬停操作：编辑（填回输入框）与原样重发 */
+	private renderUserActions(el: HTMLElement, text: string): void {
+		if (!this.onRetry && !this.onEdit) return;
+		const row = el.createDiv({ cls: "pi-learning-msg-actions" });
+		if (this.onEdit) {
+			const btn = row.createEl("button", { cls: "pi-learning-msg-action", text: "编辑", attr: { title: "填回输入框，修改后发送" } });
+			btn.addEventListener("click", () => this.onEdit?.(text));
+		}
+		if (this.onRetry) {
+			const btn = row.createEl("button", { cls: "pi-learning-msg-action", text: "重发", attr: { title: "原样重新发送（追加新回合）" } });
+			btn.addEventListener("click", () => this.onRetry?.(text));
+		}
 	}
 
 	private ensurePartEl(p: AssistantPart, body: HTMLElement): HTMLElement {
@@ -399,13 +463,16 @@ export class Transcript {
 		if (existing) return existing;
 		if (p.type === "text") {
 			p.el = body.createDiv({ cls: "pi-learning-md markdown-rendered" });
-			p.md = new StreamingMarkdown(this.app, this.component, p.el);
+			p.md = new StreamingMarkdown(this.app, this.component, p.el, undefined, () => {
+				if (this.isNearBottom()) this.scrollToBottom();
+			});
 			return p.el;
 		}
 		if (p.type === "thinking") {
 			p.el = body.createEl("details", { cls: "pi-learning-thinking" });
 			p.summary = p.el.createEl("summary");
 			p.body = p.el.createEl("pre");
+			p.smooth = new SmoothPlainText(p.body);
 			return p.el;
 		}
 		p.el = body.createEl("details", { cls: "pi-learning-tool" });
@@ -427,7 +494,9 @@ export class Transcript {
 			p.summary!.setText(streamingThis ? "思考中" : `思考（${p.text.length} 字）`);
 			p.summary!.toggleClass("pi-learning-dots", streamingThis);
 			if (streamingThis && !p.el!.open) p.el!.open = true;
-			setTextIfChanged(p.body!, p.text);
+			// 生成中经匀速揭示上屏并带末尾光标；结束（或轮到后面的部件）后定稿
+			if (streamingThis) p.smooth!.update(p.text);
+			else p.smooth!.finish(p.text);
 			return;
 		}
 		const isBb = p.name.startsWith("bb_");
@@ -448,6 +517,16 @@ export class Transcript {
 			p.el!.open = true;
 			p.autoOpened = true;
 		}
+	}
+
+	/** 触发该助手回合的用户输入：向前找最近的 user / command 块 */
+	private retryTextFor(b: AssistantBlock): string | undefined {
+		for (let i = this.blocks.indexOf(b) - 1; i >= 0; i--) {
+			const prev = this.blocks[i];
+			if (prev.kind === "user" || prev.kind === "command") return prev.text;
+			if (prev.kind === "assistant") return undefined; // 中间隔了别的回合就不猜
+		}
+		return undefined;
 	}
 
 	private isNearBottom(): boolean {
@@ -471,17 +550,21 @@ function isLastPart(b: AssistantBlock, p: AssistantPart): boolean {
 function setTextIfChanged(el: HTMLElement, text: string): void {
 	if (el.textContent !== text) el.setText(text);
 }
-/** 丢弃一个块上的所有 DOM 引用（重载历史时重新创建） */
+/** 丢弃一个块上的所有 DOM 引用（重载历史时重新创建），并停掉挂在其上的动画循环 */
 function detachDom(b: Block): void {
 	b.el = undefined;
 	if (b.kind === "assistant") {
-		b.roleEl = b.bodyEl = b.errorEl = undefined;
+		b.roleEl = b.bodyEl = b.errorEl = b.actionsEl = undefined;
 		for (const p of b.parts) {
 			if (!p) continue;
 			p.el = undefined;
-			if (p.type === "text") p.md = undefined;
-			else if (p.type === "thinking") p.body = p.summary = undefined;
-			else p.summary = p.argsEl = p.resultEl = undefined;
+			if (p.type === "text") {
+				p.md?.destroy();
+				p.md = undefined;
+			} else if (p.type === "thinking") {
+				p.smooth?.destroy();
+				p.body = p.summary = p.smooth = undefined;
+			} else p.summary = p.argsEl = p.resultEl = undefined;
 		}
 	}
 }

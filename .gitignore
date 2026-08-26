@@ -1,4 +1,6 @@
 .pi/learning-handoff.json
+# hub 的群转写（运行时数据，实例间上下文注入用）
+.pi/group/
 cron.log
 node_modules/
 *.tsbuildinfo

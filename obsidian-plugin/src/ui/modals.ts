@@ -3,7 +3,7 @@
  * confirm → 确认框；select → 模糊选择；input → 单行输入；editor → 多行编辑器。
  * 每个都返回 Promise，关闭即视为取消（扩展收到 undefined / false）。
  */
-import { type App, FuzzySuggestModal, Modal, Setting } from "obsidian";
+import { type App, Component, FuzzySuggestModal, MarkdownRenderer, Modal, Setting } from "obsidian";
 
 export function confirmModal(app: App, title: string, message: string): Promise<boolean> {
 	return new Promise((resolve) => {
@@ -95,7 +95,9 @@ export function inputModal(app: App, title: string, placeholder = "", initial = 
 	});
 }
 
-/** 多行编辑器：Ctrl/Cmd+Enter 保存，Esc 取消 */
+/** 多行编辑器：Ctrl/Cmd+Enter 保存，Esc 取消。
+ * 标题很长或多行时（闭卷作答的整道题干走这里），标题行只留首行缩略，全文渲染为正文——
+ * 题干里的代码块、公式、列表照常排版。 */
 export function editorModal(app: App, title: string, prefill = ""): Promise<string | undefined> {
 	return new Promise((resolve) => {
 		let settled = false;
@@ -104,11 +106,20 @@ export function editorModal(app: App, title: string, prefill = ""): Promise<stri
 			settled = true;
 			resolve(v);
 		};
+		const comp = new Component();
 		const m = new (class extends Modal {
 			onOpen() {
+				comp.load();
 				this.modalEl.addClass("pi-learning-editor-modal");
-				this.titleEl.setText(title);
+				const firstLine = title.split("\n")[0].trim();
+				const compact = firstLine.length > 48 ? `${firstLine.slice(0, 48)}…` : firstLine;
+				const longTitle = compact !== title.trim();
+				this.titleEl.setText(compact);
 				this.contentEl.addClass("pi-learning-modal");
+				if (longTitle) {
+					const prompt = this.contentEl.createDiv({ cls: "pi-learning-modal-prompt markdown-rendered" });
+					void MarkdownRenderer.render(app, title, prompt, "", comp);
+				}
 				const ta = this.contentEl.createEl("textarea", { cls: "pi-learning-editor" });
 				ta.value = prefill;
 				ta.addEventListener("keydown", (e) => {
@@ -135,6 +146,7 @@ export function editorModal(app: App, title: string, prefill = ""): Promise<stri
 				}, 0);
 			}
 			onClose() {
+				comp.unload();
 				done(undefined);
 				this.contentEl.empty();
 			}

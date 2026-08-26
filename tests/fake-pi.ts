@@ -136,6 +136,8 @@ type CtxExtras = {
 	/** 每次 select 弹框的标题与选项，供断言选项过滤 */
 	selects: Array<[string, string[]]>;
 	statuses: Map<string, string | undefined>;
+	/** setEditorText 的历次调用（hub 跨角色预填 @ 寻址的断言用） */
+	editorTexts: string[];
 };
 export function makeCtx(pi: FakePi, opts: HarnessOptions): ExtensionCommandContext & CtxExtras {
 	const ui = opts.ui ?? {};
@@ -143,6 +145,7 @@ export function makeCtx(pi: FakePi, opts: HarnessOptions): ExtensionCommandConte
 	const confirms: Array<[string, string]> = [];
 	const selects: Array<[string, string[]]> = [];
 	const statuses = new Map<string, string | undefined>();
+	const editorTexts: string[] = [];
 	const ctx = {
 		cwd: opts.cwd,
 		hasUI: opts.hasUI ?? true,
@@ -150,6 +153,7 @@ export function makeCtx(pi: FakePi, opts: HarnessOptions): ExtensionCommandConte
 		confirms,
 		selects,
 		statuses,
+		editorTexts,
 		ui: {
 			notify: (msg: string, level = "info") => notices.push([level, msg]),
 			confirm: async (title: string, message: string) => {
@@ -170,7 +174,7 @@ export function makeCtx(pi: FakePi, opts: HarnessOptions): ExtensionCommandConte
 			setWidget: () => {},
 			custom: async () => undefined,
 			setTitle: () => {},
-			setEditorText: () => {},
+			setEditorText: (t: string) => editorTexts.push(t),
 			getEditorText: () => "",
 			pasteToEditor: () => {},
 			theme: {},

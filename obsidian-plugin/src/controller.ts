@@ -7,8 +7,10 @@
 import { type App, Notice } from "obsidian";
 import { existsSync } from "node:fs";
 import { resolve } from "node:path";
+import { PiAuth } from "./auth.ts";
 import { locatePi } from "./locate.ts";
 import { describeSession, listSessions } from "./sessions.ts";
+import { pickProviderModel, type RpcModel } from "./ui/model-picker.ts";
 import { PiRpcClient } from "./rpc/client.ts";
 import type { AgentMessage, RpcEvent, RpcState, UiRequest, UiResponse } from "./rpc/types.ts";
 import type { PiLearningSettings } from "./settings.ts";
@@ -45,6 +47,8 @@ export class LearningController {
 	private surface: ControllerSurface | null = null;
 	private starting: Promise<void> | null = null;
 	private refreshing = false;
+	/** 强制重载撞上进行中的刷新时排队补刷，而不是丢弃（否则新会话后页签可能不刷新） */
+	private forceReloadQueued = false;
 
 	constructor(
 		private app: App,
@@ -83,7 +87,10 @@ export class LearningController {
 		if (!launch) throw new Error("找不到 pi：请全局安装 @earendil-works/pi-coding-agent，或在设置里填写 pi 的 dist/cli.js 路径。");
 		this.launchSource = launch.source;
 		const args = ["-a", ...(s.extraArgs ? splitArgs(s.extraArgs) : [])];
-		if (s.model?.trim()) args.push("--model", s.model.trim());
+		const preferred = this.preferredModel();
+		if (preferred) args.push("--model", preferred);
+		const thinking = this.preferredThinking();
+		if (thinking) args.push("--thinking", thinking);
 		const client = new PiRpcClient({
 			command: launch.command,
 			commandArgs: launch.args,
@@ -108,8 +115,10 @@ export class LearningController {
 		if (saved && existsSync(saved)) {
 			try {
 				await client.switchSession(saved);
-			} catch {
-				/* 会话文件不可用则保持新会话 */
+				this.surface?.onSystem("已续接上次会话。");
+			} catch (e) {
+				// 静默吞掉会让「新会话」与「历史没加载」无从分辨
+				this.surface?.onSystem(`上次会话续接失败（${(e as Error).message}），已新开会话。`, "warning");
 			}
 		}
 		await this.refreshState(true);
@@ -120,6 +129,70 @@ export class LearningController {
 			} catch {
 				/* 命名失败不影响使用 */
 			}
+		}
+		// 会话建立时扩展可能按 .pi/learning.json 设过模型；学习者的角色级选择优先，最后校准一次
+		await this.applyPreferredModel();
+		await this.fallbackIfNoModel();
+		await this.applyPreferredThinking();
+	}
+
+	/** 本角色的思考等级偏好：角色 > 全局默认；空串视为未配置 */
+	private preferredThinking(): string {
+		const s = this.settings();
+		return (s.roleThinking?.[this.spec.role] ?? s.thinking ?? "").trim();
+	}
+
+	/** 当前思考等级与偏好不一致时切换过去；当前模型不支持该等级则保持现状 */
+	async applyPreferredThinking(): Promise<void> {
+		const pref = this.preferredThinking();
+		const client = this.client;
+		if (!pref || !client?.running || this.state?.thinkingLevel === pref) return;
+		try {
+			const levels = await client.getAvailableThinkingLevels();
+			if (!levels.includes(pref)) return;
+			await client.setThinkingLevel(pref);
+			await this.refreshState();
+		} catch {
+			/* 等级不可用则保持现状 */
+		}
+	}
+
+	/** 本角色的模型偏好：角色模型 > 全局默认；空串视为未配置 */
+	private preferredModel(): string {
+		const s = this.settings();
+		return (s.roleModels?.[this.spec.role] ?? s.model ?? "").trim();
+	}
+
+	/** 当前模型与角色偏好不一致时切换过去；模型不可用（未登录该供应商等）则保持现状 */
+	async applyPreferredModel(): Promise<void> {
+		const pref = this.settings().roleModels?.[this.spec.role]?.trim();
+		const client = this.client;
+		if (!pref || !client?.running) return;
+		const cur = this.state?.model ? `${this.state.model.provider}/${this.state.model.id}` : "";
+		if (cur === pref) return;
+		const idx = pref.indexOf("/");
+		if (idx <= 0) return;
+		try {
+			await client.setModel(pref.slice(0, idx), pref.slice(idx + 1));
+			await this.refreshState();
+		} catch {
+			this.surface?.onSystem(`角色模型 ${pref} 不可用，沿用 ${cur || "pi 默认"}。`, "warning");
+		}
+	}
+
+	/** 配置的模型失效（供应商无凭据、模型下线）时自动回退到可用列表的第一个，避免实例瘫在「无可用模型」 */
+	private async fallbackIfNoModel(): Promise<void> {
+		const client = this.client;
+		if (!client?.running || this.state?.model) return;
+		try {
+			const models = await client.getAvailableModels();
+			const m = models[0];
+			if (!m) return;
+			await client.setModel(m.provider, m.id);
+			await this.refreshState();
+			this.surface?.onSystem(`配置的模型不可用，已回退到 ${m.provider}/${m.id}。可在顶栏或设置里改选。`, "warning");
+		} catch {
+			/* 连模型列表都取不到：保持无模型状态，顶栏会提示 */
 		}
 	}
 
@@ -180,6 +253,8 @@ export class LearningController {
 		const r = await this.requireClient().newSession();
 		if (r.cancelled) new Notice("会话切换被取消。");
 		await this.refreshState(true);
+		await this.applyPreferredModel();
+		await this.applyPreferredThinking();
 	}
 
 	async loadHistory(): Promise<AgentMessage[]> {
@@ -213,36 +288,98 @@ export class LearningController {
 		const target = sessions[labels.indexOf(picked)];
 		if (!target) return;
 		if (resolve(target.path) === current) return;
-		const r = await client.switchSession(target.path);
+		await this.switchToSession(target.path);
+	}
+
+	/** 切到指定会话文件并重载校准（历史会话选择器与会话树共用） */
+	async switchToSession(path: string): Promise<void> {
+		const client = this.requireClient();
+		if (this.state?.sessionFile && resolve(this.state.sessionFile) === resolve(path)) return;
+		const r = await client.switchSession(path);
 		if (r.cancelled) {
 			new Notice("会话切换被取消。");
 			return;
 		}
 		this.statuses.clear();
 		await this.refreshState(true);
+		await this.applyPreferredModel();
+		await this.applyPreferredThinking();
 	}
 
-	/** 弹出可用模型列表，选中即切换；记到设置里，下次启动沿用 */
-	async pickModel(): Promise<void> {
+	/** 本实例是否正在流式生成（回滚等操作应避开进行中的回合） */
+	get streamingNow(): boolean {
+		return !!this.state?.isStreaming;
+	}
+
+	/** 当前会话文件（会话树标注实例落点用）；未运行或未知为 null */
+	get currentSessionFile(): string | null {
+		return this.state?.sessionFile ?? null;
+	}
+
+	/** 按原文定位当前会话线上的用户消息条目（重发 / 编辑的回滚点；取最后一个全等匹配） */
+	async findForkEntry(text: string): Promise<string | undefined> {
+		const client = this.client;
+		if (!client?.running) return undefined;
+		const list = await client.getForkMessages();
+		for (let i = list.length - 1; i >= 0; i--) if (list[i].text === text) return list[i].entryId;
+		return undefined;
+	}
+
+	/**
+	 * 回滚到某条用户消息之前：pi 的 fork 把根到落点的路径抄成新会话线并切换，
+	 * 旧线原样保留（会话树里可随时切回）。返回该消息原文；取消返回 undefined。
+	 */
+	async rewindBefore(entryId: string): Promise<string | undefined> {
 		const client = this.requireClient();
-		const models = await client.getAvailableModels();
-		if (!models.length) {
-			new Notice("pi 没有可用模型：请在终端运行 pi 并 /login，或配置 API key 环境变量。", 8000);
-			return;
+		const r = await client.fork(entryId);
+		if (r.cancelled) {
+			new Notice("回滚被取消。");
+			return undefined;
 		}
-		const current = this.state?.model ? `${this.state.model.provider}/${this.state.model.id}` : "";
-		const labels = models.map((m) => `${m.provider}/${m.id}${m.name && m.name !== m.id ? `  ${m.name}` : ""}`);
-		const picked = await selectModal(this.app, `选择模型（当前：${current || "无"}）`, labels);
-		if (!picked) return;
-		const m = models[labels.indexOf(picked)];
-		if (!m) return;
-		await client.setModel(m.provider, m.id);
-		this.onModelChosen?.(`${m.provider}/${m.id}`);
-		await this.refreshState();
-		new Notice(`已切换到 ${m.provider}/${m.id}`);
+		this.statuses.clear();
+		await this.refreshState(true);
+		await this.applyPreferredModel();
+		await this.applyPreferredThinking();
+		return r.text ?? "";
 	}
 
-	/** 弹出当前模型支持的思考等级 */
+	/**
+	 * 两级模型选择：先供应商（含未登录的，选中即走官方登录流程），再模型。
+	 * 只负责「选出一个值」（"provider/id"），不改实例模型、不写设置——写到哪由调用方定
+	 * （顶栏 → 当前角色；设置页默认模型 → 全局；各角色模型行 → 对应角色）。
+	 * 实例未运行会先拉起（可用模型列表来自 RPC）；登录成功则重启加载新凭据后接着选。
+	 */
+	async pickModelValue(): Promise<string | undefined> {
+		if (!this.client?.running) {
+			new Notice(`【${this.spec.label}】未运行，正在启动…`);
+			await this.start();
+		}
+		const client = this.requireClient();
+		const models = (await client.getAvailableModels()) as RpcModel[];
+		const s = this.settings();
+		const auth = PiAuth.load(locatePi(s.piPath, s.nodePath || "node", s.projectDir?.trim() || undefined));
+		const r = await pickProviderModel(this.app, { available: models, auth });
+		if (!r) return undefined;
+		if (r.kind === "logged_in") {
+			new Notice(`已登录 ${r.provider}，正在重启【${this.spec.label}】以加载新凭据…`);
+			await this.start();
+			return this.pickModelValue();
+		}
+		return `${r.provider}/${r.id}`;
+	}
+
+	/** 顶栏入口：选中即切换本实例的模型，并记到本角色的设置里 */
+	async pickModel(): Promise<void> {
+		const v = await this.pickModelValue();
+		if (!v) return;
+		const idx = v.indexOf("/");
+		await this.requireClient().setModel(v.slice(0, idx), v.slice(idx + 1));
+		this.onModelChosen?.(this.spec.role, v);
+		await this.refreshState();
+		new Notice(`已为【${this.spec.label}】切换到 ${v}`);
+	}
+
+	/** 弹出当前模型支持的思考等级；选中记到本角色的设置里，下次启动沿用 */
 	async pickThinkingLevel(): Promise<void> {
 		const client = this.requireClient();
 		const levels = await client.getAvailableThinkingLevels();
@@ -250,14 +387,18 @@ export class LearningController {
 			new Notice("当前模型不支持调节思考等级。");
 			return;
 		}
-		const picked = await selectModal(this.app, `思考等级（当前：${this.state?.thinkingLevel ?? "?"}）`, levels);
+		const picked = await selectModal(this.app, `【${this.spec.label}】思考等级（当前：${this.state?.thinkingLevel ?? "?"}）`, levels);
 		if (!picked) return;
 		await client.setThinkingLevel(picked);
+		this.onThinkingChosen?.(this.spec.role, picked);
 		await this.refreshState();
+		new Notice(`已为【${this.spec.label}】把思考等级设为 ${picked}`);
 	}
 
-	/** 由插件注入：把用户在面板里选的模型写回设置 */
-	onModelChosen: ((model: string) => void) | null = null;
+	/** 由插件注入：把用户在面板里选的模型写回本角色的设置 */
+	onModelChosen: ((role: string, model: string) => void) | null = null;
+	/** 由插件注入：把用户在面板里选的思考等级写回本角色的设置 */
+	onThinkingChosen: ((role: string, level: string) => void) | null = null;
 
 	private requireClient(): PiRpcClient {
 		if (!this.client?.running) throw new Error("pi 未运行；请先启动。");
@@ -269,7 +410,12 @@ export class LearningController {
 	/** 拉取 get_state；sessionFile 变化时通知视图重载历史 */
 	async refreshState(forceReload = false): Promise<void> {
 		const client = this.client;
-		if (!client?.running || this.refreshing) return;
+		if (!client?.running) return;
+		if (this.refreshing) {
+			// 并发的事件刷新可能读到的还是旧会话，对比不出变化；强制重载必须补做
+			if (forceReload) this.forceReloadQueued = true;
+			return;
+		}
 		this.refreshing = true;
 		try {
 			const prev = this.state;
@@ -289,6 +435,10 @@ export class LearningController {
 			this.lastError = (e as Error).message;
 		} finally {
 			this.refreshing = false;
+			if (this.forceReloadQueued) {
+				this.forceReloadQueued = false;
+				void this.refreshState(true);
+			}
 		}
 	}
 

@@ -11,16 +11,20 @@ import { TriggerWatcher } from "./triggers.ts";
 import { LearningView, VIEW_TYPE } from "./view.ts";
 
 export default class PiLearningPlugin extends Plugin {
-	settings: PiLearningSettings = { ...DEFAULT_SETTINGS, roleSessions: {} };
+	settings: PiLearningSettings = { ...DEFAULT_SETTINGS, roleSessions: {}, roleModels: {} };
 	manager!: InstanceManager;
 	watcher!: TriggerWatcher;
 
 	async onload(): Promise<void> {
 		await this.loadSettings();
 		this.manager = new InstanceManager(this.app, () => this.settings, () => void this.saveSettings());
-		// 面板里切换的模型写回设置，下次启动实例时作为 --model 沿用
-		this.manager.onModelChosen = (model) => {
-			this.settings.model = model;
+		// 面板里切换的模型记到该角色名下，下次启动该实例时沿用；全局默认模型只在设置页改
+		this.manager.onModelChosen = (role, model) => {
+			this.settings.roleModels[role] = model;
+			void this.saveSettings();
+		};
+		this.manager.onThinkingChosen = (role, level) => {
+			this.settings.roleThinking[role] = level;
 			void this.saveSettings();
 		};
 		// 自主触发（P3）：常驻轮询，开关与冷却读设置；默认关闭
@@ -57,7 +61,8 @@ export default class PiLearningPlugin extends Plugin {
 
 	async loadSettings(): Promise<void> {
 		const loaded = ((await this.loadData()) ?? {}) as Partial<PiLearningSettings>;
-		this.settings = { ...DEFAULT_SETTINGS, ...loaded, roleSessions: { ...(loaded.roleSessions ?? {}) } };
+		this.settings = { ...DEFAULT_SETTINGS, ...loaded, roleSessions: { ...(loaded.roleSessions ?? {}) }, roleModels: { ...(loaded.roleModels ?? {}) }, roleThinking: { ...(loaded.roleThinking ?? {}) }, projectHistory: [...(loaded.projectHistory ?? [])] };
+		if (this.settings.projectDir && !this.settings.projectHistory.includes(this.settings.projectDir)) this.settings.projectHistory.unshift(this.settings.projectDir);
 		// 首次使用：若 vault 根目录本身就是学习项目，直接用它
 		if (!this.settings.projectDir) {
 			const base = this.vaultBasePath();

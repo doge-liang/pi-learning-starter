@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, rmSync, utimesSync, writeFileSync } from "node:
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { after, describe, it } from "node:test";
-import { describeSession, listSessions, sessionDirFor, summarize } from "../src/sessions.ts";
+import { buildSessionTree, describeSession, listSessions, sessionDirFor, type SessionSummary, summarize } from "../src/sessions.ts";
 
 const NL = String.fromCharCode(10);
 
@@ -50,6 +50,12 @@ describe("summarize / listSessions", () => {
 		assert.equal(summarize("/x/c.jsonl", "not json", new Date()), undefined);
 	});
 
+	it("summarize 解析 parentSession（fork 派生边）", () => {
+		const raw = session("forked", [["user", "改一下"]]).replace('"cwd":"D:/p"', '"cwd":"D:/p","parentSession":"/x/a.jsonl"');
+		const s = summarize("/x/f.jsonl", raw, new Date());
+		assert.equal(s?.parentSession, "/x/a.jsonl");
+	});
+
 	it("listSessions 只读本项目目录，按修改时间倒序", () => {
 		const cwd = "D:/Some/Project";
 		const dir = sessionDirFor(cwd, agent);
@@ -66,5 +72,39 @@ describe("summarize / listSessions", () => {
 		utimesSync(join(dir, "new.jsonl"), new Date(t), new Date(t));
 		const list = listSessions(cwd, agent);
 		assert.deepEqual(list.map((s) => s.name), ["new", "old"]);
+	});
+});
+
+describe("buildSessionTree", () => {
+	const mk = (path: string, created: string, modified: string, parentSession?: string): SessionSummary => ({
+		path,
+		id: path,
+		created: new Date(created),
+		modified: new Date(modified),
+		messageCount: 1,
+		firstMessage: path,
+		parentSession,
+	});
+
+	it("按 parentSession 连边；父缺失作根；子按创建时间升序，根按子树最近活动降序", () => {
+		const a = mk("/s/a.jsonl", "2026-08-20T10:00:00Z", "2026-08-20T10:30:00Z");
+		const b = mk("/s/b.jsonl", "2026-08-20T11:00:00Z", "2026-08-20T11:30:00Z", "/s/a.jsonl");
+		const c = mk("/s/c.jsonl", "2026-08-20T12:00:00Z", "2026-08-27T09:00:00Z", "/s/a.jsonl");
+		const orphan = mk("/s/o.jsonl", "2026-08-21T00:00:00Z", "2026-08-21T00:00:00Z", "/gone.jsonl");
+		const roots = buildSessionTree([c, orphan, a, b]);
+		assert.deepEqual(roots.map((r) => r.session.path), ["/s/a.jsonl", "/s/o.jsonl"], "a 子树的最近活动（c）更新，排前");
+		assert.deepEqual(roots[0].children.map((n) => n.session.path), ["/s/b.jsonl", "/s/c.jsonl"], "同父分支按创建先后");
+	});
+
+	it("互指成环不丢节点：全部会话仍出现在树里", () => {
+		const x = mk("/s/x.jsonl", "2026-08-20T10:00:00Z", "2026-08-20T10:00:00Z", "/s/y.jsonl");
+		const y = mk("/s/y.jsonl", "2026-08-20T11:00:00Z", "2026-08-20T11:00:00Z", "/s/x.jsonl");
+		const all = new Set<string>();
+		const walk = (n: { session: SessionSummary; children: unknown[] }) => {
+			all.add(n.session.path);
+			for (const c of n.children as Array<{ session: SessionSummary; children: unknown[] }>) walk(c);
+		};
+		for (const r of buildSessionTree([x, y])) walk(r);
+		assert.deepEqual([...all].sort(), ["/s/x.jsonl", "/s/y.jsonl"]);
 	});
 });
