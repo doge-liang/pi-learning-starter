@@ -476,6 +476,17 @@ export class LearningView extends ItemView {
 							const text = (e.entry.data as { text?: string } | undefined)?.text ?? "";
 							if (text) transcript.addNote(text);
 						}
+						// 学习者在选择框里选中的跨角色路由：以学习者名义派发给目标实例
+						// （队列串行，本回合结束后才执行；照常回显与记群转写）
+						if (e.entry?.customType === "learning-route") {
+							const d = e.entry.data as { role?: string; text?: string } | undefined;
+							const spec = d?.role ? roleSpec(d.role) : undefined;
+							if (spec && d?.text) {
+								transcript.addSystem(`已转交 @${spec.label}：${d.text}`);
+								view.markUnread(spec.role);
+								view.manager.dispatch(spec.role, d.text);
+							}
+						}
 						break;
 					}
 					case "agent_settled":

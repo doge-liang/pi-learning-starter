@@ -98,8 +98,10 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
 		if (!chosen) return "\n学习者的选择无法识别；不要重试。";
 		const t = crossTarget(chosen.route);
 		if (t) {
-			ctx.ui.setEditorText(`@${shortLabel(t)} ${chosen.label}`);
-			return `\n学习者选择：${chosen.label}，目标是 @${shortLabel(t)} 实例。寻址消息已预填进输入框，请学习者回车发送即可；不要代发、不要重复解释怎么 @。`;
+			// 学习者刚在选择框里点过：这一下就是明确的路由意志，hub 端（插件）收到条目后
+			// 会以学习者名义把消息派发给目标实例——本实例仍然不代替别的实例发言
+			pi.appendEntry("learning-route", { role: t, text: chosen.label });
+			return `\n学习者选择：${chosen.label}。已转交 @${shortLabel(t)} 实例，将在本回合结束后开始处理；不要代答、不要重复解释。`;
 		}
 		// followUp：排到当前回合结束后再执行，避免会话切换把正在收尾的回合掐断
 		pi.sendUserMessage(`/go ${chosen.route}`, { deliverAs: "followUp", expandPromptTemplates: true });
@@ -155,8 +157,8 @@ export function registerTools(pi: ExtensionAPI, deps: ToolDeps): void {
 			if (!chosen) return text("学习者的选择无法识别；请重新调用。");
 			const target = crossTarget(chosen.route);
 			if (target) {
-				ctx.ui.setEditorText(`@${shortLabel(target)} ${chosen.label}`);
-				return text(`学习者选择：${chosen.label}，目标是 @${shortLabel(target)} 实例。寻址消息已预填进输入框，请学习者回车发送即可；不要代发、不要重复解释怎么 @。`);
+				pi.appendEntry("learning-route", { role: target, text: chosen.label });
+				return text(`学习者选择：${chosen.label}。已转交 @${shortLabel(target)} 实例，将在本回合结束后开始处理；不要代答、不要重复解释。`);
 			}
 			pi.sendUserMessage(`/go ${chosen.route}`, { deliverAs: "followUp", expandPromptTemplates: true });
 			return text(`学习者选择：${pick}。已派发，将在本回合结束后执行；本轮不需要你再推进别的。`);

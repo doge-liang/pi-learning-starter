@@ -70,20 +70,20 @@ describe("常驻实例（hub）模式", () => {
 			assert.match(pi.lastMessage(), /\[begin-session\]/);
 			assert.equal(lastState(pi).unit, "u02");
 
-			// bb_route_ask 跨角色：选项保留（标注转 @），选中后预填寻址而非派发。
-			// 选项文字由 renderRoute 拼装，测试先以「稍后」捕获真实文字，再选中跨角色项
+			// bb_route_ask 跨角色：选项保留（标注转 @），选中后落 learning-route 条目由插件转交，
+			// 本实例不派发 /go。选项文字由 renderRoute 拼装，先以「稍后」捕获真实文字再选中
 			uiScript.select.push("稍后再说");
 			await pi.tool("bb_route_ask").execute("t", { routes: ["assess"] }, undefined, undefined, ctx);
 			const [, askOptions] = ctx.selects.at(-1)!;
 			const crossOption = askOptions.find((o) => o.includes("转 @复盘老师"));
 			assert.ok(crossOption, "跨角色选项保留且标注去向");
-			ctx.editorTexts.length = 0;
 			pi.sentMessages.length = 0;
 			uiScript.select.push(crossOption);
 			const ask = await pi.tool("bb_route_ask").execute("t", { routes: ["assess"] }, undefined, undefined, ctx);
-			assert.match(ask.content[0].text, /@复盘老师/);
-			assert.ok(ctx.editorTexts.some((t) => t.startsWith("@复盘老师 ")), "选中后预填寻址");
-			assert.equal(pi.sentMessages.length, 0, "跨角色不派发 /go");
+			assert.match(ask.content[0].text, /已转交 @复盘老师/);
+			const route = pi.entries.find((e) => e.customType === "learning-route");
+			assert.deepEqual((route?.data as { role?: string })?.role, "assessor", "落 learning-route 条目交插件派发");
+			assert.equal(pi.sentMessages.length, 0, "跨角色不在本实例派发 /go");
 
 			// 常驻实例不支持退出学习模式
 			ctx.notices.length = 0;
