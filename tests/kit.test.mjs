@@ -151,9 +151,20 @@ describe("安装脚本", () => {
 		for (const t of [ps1, sh]) assert.ok(t.includes("PI_CODING_AGENT_DIR"), "应尊重 PI_CODING_AGENT_DIR");
 	});
 
-	it("install.ps1 带 UTF-8 BOM：Windows PowerShell 5.1 对无 BOM 的中文脚本按 ANSI 解码，整个文件解析失败", () => {
-		const head = [...readFileSync(join(root, "scripts/install.ps1")).subarray(0, 3)];
-		assert.deepEqual(head, [0xef, 0xbb, 0xbf]);
+	it("含中文的 .ps1 都带 UTF-8 BOM：Windows PowerShell 5.1 对无 BOM 的中文脚本按 ANSI 解码，整个文件解析失败", () => {
+		for (const f of ["scripts/install.ps1", "scripts/learn.ps1"]) {
+			const head = [...readFileSync(join(root, f)).subarray(0, 3)];
+			assert.deepEqual(head, [0xef, 0xbb, 0xbf], `${f} 缺少 BOM`);
+		}
+	});
+
+	it("启动脚本只带套件的四个技能，并要求学习目录里有 AGENTS.md", () => {
+		for (const f of ["scripts/learn.ps1", "scripts/learn.sh"]) {
+			const t = read(f);
+			assert.ok(t.includes("--no-skills"), `${f} 应用 --no-skills 排除其它技能`);
+			for (const s of skillDirs) assert.ok(t.includes(s), `${f} 未带技能 ${s}`);
+			assert.ok(t.includes("AGENTS.md"), `${f} 应检查学习目录的 AGENTS.md`);
+		}
 	});
 });
 

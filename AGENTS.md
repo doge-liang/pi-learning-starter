@@ -33,6 +33,6 @@
 
 ## 安全边界
 
-- 只在本目录内创建与修改文件，不修改本目录之外的任何文件，包括 Obsidian 库的其余部分。
+- 只在本目录内创建与修改文件，不修改本目录之外的任何文件，包括 Obsidian 库的其余部分。本目录是学习工作区，把稳固内容提炼为库内笔记由学习者另行进行，教学会话不代劳。
 - `bash` 与 `powershell` 工具仅用于本目录内的验证性操作、取得日期，以及用 `curl` 向下列公开只读 API 的 GET 接口做事实核查：Crossref、OpenAlex、arXiv、Semantic Scholar、Wikipedia（REST 与 action API）、npm、PyPI、api.github.com 的仓库与发布元数据。清单之外的域名、任何非 GET 请求、把响应保存为文件、安装依赖、修改全局配置，都先说明并等待同意。
 - 不删除 `sessions/` 与 `maps/` 中的既有文件；内容需要修正时用追加或原地编辑。

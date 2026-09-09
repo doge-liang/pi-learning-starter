@@ -4,7 +4,7 @@
 
 一套以 markdown 为主的一对一教学配置，运行在 [pi](https://github.com/badlogic/pi-mono) 上，由四个技能组成：`teach-cn` 按「摸底 → 规划 → 单步教学」三阶段讲授任意主题，先用逐题测验定位你理解的边缘，再给出依赖图供你确认，然后每次只推进一个推理步并当场检验；`quiz-cn` 随时出题只测不讲；`viz-cn` 为概念生成最小化图示（mermaid 或 SVG）；`fact-check-cn` 对具体断言做分级核查。整个过程写成 Obsidian 库里的笔记（会话记录、依赖图、学习者档案、图示），公式、mermaid 与 SVG 在 Obsidian 中实时渲染。
 
-技能部分只由 markdown 构成，不触发 pi 的项目信任流程；第八节的两个扩展是可选的用户级 TypeScript 扩展（代码在本仓库 `extensions/`，随时可读），不想装时用 `-NoExtensions`。教学方法参考 [amosblomqvist/learn](https://github.com/amosblomqvist/learn)，此处为中文本地化改写，不使用该仓库的扩展与子代理（测验与可视化改由本仓库自带的两个轻量扩展实现，事实核查改用免密钥的公开 API）。本套件此前的复杂实现（八角色多实例 hub、Obsidian 插件、JSON 黑板）保留在分支 `archive/hub` 与标签 `v0-hub`；后续按需补回的功能见 [ROADMAP.md](ROADMAP.md)。
+技能部分只由 markdown 构成，不触发 pi 的项目信任流程；第九节的两个扩展是可选的用户级 TypeScript 扩展（代码在本仓库 `extensions/`，随时可读），不想装时用 `-NoExtensions`。教学方法参考 [amosblomqvist/learn](https://github.com/amosblomqvist/learn)，此处为中文本地化改写，不使用该仓库的扩展与子代理（测验与可视化改由本仓库自带的两个轻量扩展实现，事实核查改用免密钥的公开 API）。本套件此前的复杂实现（八角色多实例 hub、Obsidian 插件、JSON 黑板）保留在分支 `archive/hub` 与标签 `v0-hub`；后续按需补回的功能见 [ROADMAP.md](ROADMAP.md)。
 
 本文以 Windows 11 原生环境（PowerShell、Windows Terminal）与 pi 0.84.4 为准；WSL 与 macOS 见附录。
 
@@ -67,6 +67,15 @@ pi
 
 必须在学习目录（或其子目录）里启动：pi 只向上查找 `AGENTS.md`，在库根启动不会加载学习目录的约定；`pi -c` 与 `pi -r` 也按启动目录归档会话。启动信息里会列出已加载的技能与上下文文件。
 
+**一键启动。** 库根的 `.agents\skills` 与全局的其它技能都会以名称与描述进入每次系统提示；`scripts\learn.ps1` 会切到学习目录并以 `--no-skills` 加四个 `--skill` 启动，只带本套件的技能（扩展不受影响）。把下面两行加进 PowerShell 配置文件（`notepad $PROFILE`），之后在任何目录输入 `learn` 即可，`learn -c` 续上次会话：
+
+```powershell
+$env:PI_LEARN_DIR = "D:\Knowledge\PiLearn"
+function learn { & "D:\Workspace\project\pi-learning-starter\scripts\learn.ps1" @args }
+```
+
+WSL 与 macOS 用 `alias learn='sh <本仓库路径>/scripts/learn.sh'`。
+
 进入后先设定模型与思考档位。教学质量对模型智能高度敏感，这里不宜省钱：
 
 1. `/model`（或 `Ctrl+L`）打开选择器。`Enter` 仅在本会话切换到该模型；`Ctrl+S` 切换并同时保存为启动默认。
@@ -120,7 +129,13 @@ pi
 - **中文输入法候选框错位。** 在 `settings.json` 设置 `"showHardwareCursor": true`。
 - **一次只跑一个 pi 写同一个学习目录。** 需要并行（例如另开一个会话做评审），用不同主题或等前一个收尾。
 
-## 七、按自己的方式修改
+## 七、学习区与知识库的分工
+
+`PiLearn` 是学习**工作区**：会话记录、依赖图、`LEARNER.md` 与附件都是过程材料，按本套件的规范写，不套用库级的笔记规范；`AGENTS.md` 已声明它优先于库根约定，并禁止技能写到 `PiLearn` 之外。沉淀进库的原子笔记是另一步，由你在主题收尾、`LEARNER.md` 里进入「稳固」之后进行：按库自己的规范（例如 `1-Notes`、`2-Maps`）提炼要点，在笔记里以 `[[PiLearn/maps/<slug>]]` 回链依赖图，必要时引用 `sessions/` 里的节点内容。教学会话不代劳这一步：过程材料与知识资产的规范不同，混写会把两边都弄脏。
+
+`LEARNER.md` 是跨会话唯一的状态文件，随库一起进 git。每次收尾后看一眼「未竟」与「似懂非懂」，与自我感觉不符就在下次会话开头指出，这也是校准教师的机会。同一学习目录承载所有主题，主题以 slug 区分；旧系统留下的隐藏目录（如 `.learning\`）与新套件无关，归档或删除均可，其中的画像与掌握度结论可手抄进 `LEARNER.md`。
+
+## 八、按自己的方式修改
 
 `teach-cn` 是一份可读的 markdown，改它就是改教学方式：
 
@@ -132,7 +147,7 @@ pi
 
 修改后重新执行安装脚本（或直接改 `$HOME\.pi\agent\skills` 里的副本），在 pi 中 `/reload` 生效。`npm test` 运行套件自检（frontmatter、引用路径、mermaid 模板约束、语体禁令、两个扩展的纯逻辑），零依赖。
 
-## 八、随套件安装的两个用户级扩展
+## 九、随套件安装的两个用户级扩展
 
 安装脚本会把 `extensions\` 下的两个扩展复制到 `$HOME\.pi\agent\extensions\`（用户级扩展不经过项目信任流程；代码就在本仓库里，随时可读）：
 
@@ -141,7 +156,7 @@ pi
 
 不想装扩展时用 `.\scripts\install.ps1 -NoExtensions`（sh 版设 `NO_EXTENSIONS=1`）。事实核查不需要扩展：`fact-check-cn` 用 `curl` 查免密钥的公开 API（Crossref、OpenAlex、arXiv、Wikipedia、npm 等，见 `skills/fact-check-cn/references/verify.md`），`AGENTS.md` 的安全边界已允许这类只读请求。
 
-## 九、可选增强
+## 十、可选增强
 
 - **联网核查**：安装 [badlogic/pi-skills](https://github.com/badlogic/pi-skills) 的 `brave-search` 技能，`fact-check-cn` 会自动利用它。只复制这一个技能，整个仓库放进技能目录会让其中全部技能都进入系统提示：`git clone https://github.com/badlogic/pi-skills $env:TEMP\pi-skills`，然后 `Copy-Item -Recurse $env:TEMP\pi-skills\brave-search "$HOME\.pi\agent\skills\brave-search"`，在 `$HOME\.pi\agent\skills\brave-search` 里 `npm install`；需要 Brave 的 API key。
 - **原仓库的扩展**（测验弹窗、子代理事实核查与自动图示）依赖 [pi-interactive-subagents](https://github.com/amosblomqvist/pi-interactive-subagents)，而它只支持 tmux，Windows 原生下不可用；需要时在 WSL 中另行搭建，并注意 pi 没有沙箱，信任一个含 `extensions/` 的 `.pi` 目录等于允许其中代码在你的机器上执行，启用前先通读。
@@ -174,6 +189,7 @@ skills/fact-check-cn/SKILL.md     断言核查技能；references/verify.md 是�
 extensions/quiz/                  quiz 工具：打乱选项、弹出选择框、即时判定（index.ts 接 pi，logic.mjs 是纯逻辑）
 extensions/viz-tools/             render_svg 与 check_mermaid 工具（package.json 声明 @resvg/resvg-js）
 scripts/install.ps1 / install.sh  安装脚本（技能、扩展及其依赖、学习目录）
+scripts/learn.ps1 / learn.sh      一键启动：切到学习目录，只带四个技能启动 pi
 tests/kit.test.mjs                套件自检（npm test）
 ROADMAP.md                        以后缺了再加的功能清单
 ```
