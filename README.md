@@ -4,7 +4,7 @@
 
 一套以 markdown 为主的一对一教学配置，运行在 [pi](https://github.com/badlogic/pi-mono) 上，由四个技能组成：`teach-cn` 按「摸底 → 规划 → 单步教学」三阶段讲授任意主题，先用逐题测验定位你理解的边缘，再给出依赖图供你确认，然后每次只推进一个推理步并当场检验；`quiz-cn` 随时出题只测不讲；`viz-cn` 为概念生成最小化图示（mermaid 或 SVG）；`fact-check-cn` 对具体断言做分级核查。整个过程写成 Obsidian 库里的笔记（会话记录、依赖图、学习者档案、图示），公式、mermaid 与 SVG 在 Obsidian 中实时渲染。
 
-技能部分只由 markdown 构成，不触发 pi 的项目信任流程；第八节的两个扩展是可选的用户级 TypeScript 扩展（代码在本仓库 `extensions/`，随时可读），不想装时用 `-NoExtensions`。教学方法参考 [amosblomqvist/learn](https://github.com/amosblomqvist/learn)，此处为纯 markdown 的中文本地化改写，不包含该仓库的扩展与子代理。本套件此前的复杂实现（八角色多实例 hub、Obsidian 插件、JSON 黑板）保留在分支 `archive/hub` 与标签 `v0-hub`；后续按需补回的功能见 [ROADMAP.md](ROADMAP.md)。
+技能部分只由 markdown 构成，不触发 pi 的项目信任流程；第八节的两个扩展是可选的用户级 TypeScript 扩展（代码在本仓库 `extensions/`，随时可读），不想装时用 `-NoExtensions`。教学方法参考 [amosblomqvist/learn](https://github.com/amosblomqvist/learn)，此处为中文本地化改写，不使用该仓库的扩展与子代理（测验与可视化改由本仓库自带的两个轻量扩展实现，事实核查改用免密钥的公开 API）。本套件此前的复杂实现（八角色多实例 hub、Obsidian 插件、JSON 黑板）保留在分支 `archive/hub` 与标签 `v0-hub`；后续按需补回的功能见 [ROADMAP.md](ROADMAP.md)。
 
 本文以 Windows 11 原生环境（PowerShell、Windows Terminal）与 pi 0.84.4 为准；WSL 与 macOS 见附录。
 
@@ -88,7 +88,7 @@ pi
 | `/skill:teach-cn 只摸底 <主题>` | 摸底后写入档案即停，下次直接从规划开始 |
 | `/skill:teach-cn 继续 <主题>` | 读取上次的依赖图与记录，复核薄弱与暂缓节点后接着讲 |
 | `/skill:quiz-cn [范围] [题数]` | 只测不讲：一次一道单选题，答后立即判定；结束给得分、逐题清单与薄弱点，写入当日记录与档案。范围缺省先取今天学过的节点，题数有余时补档案里的薄弱点；题数缺省五道 |
-| `/skill:viz-cn <对象>` | 为一个概念、结构或过程画一张最小化图示：关系与流程用 mermaid 嵌入笔记，几何与坐标用 SVG 写入 `attachments/`，生成后做源码级自检 |
+| `/skill:viz-cn <对象>` | 为一个概念、结构或过程画一张最小化图示：关系与流程用 mermaid 嵌入笔记，几何与坐标用 SVG 写入 `attachments/`；生成后用 `check_mermaid` 检查、用 `render_svg` 渲染成图亲眼核对（没装扩展时退回源码级自检） |
 | `/skill:fact-check-cn <说法>` | 断言重述、类别、判定与失效条件；无法核实时明确标注未核验 |
 
 ## 五、常用操作（Windows 默认按键）
