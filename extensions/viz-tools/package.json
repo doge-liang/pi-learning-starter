@@ -1,0 +1,10 @@
+{
+  "name": "pi-learn-kit-viz-tools",
+  "version": "1.0.0",
+  "private": true,
+  "description": "viz-cn 技能的工具：render_svg（SVG 渲染成 PNG 供模型查看）与 check_mermaid（mermaid 静态检查）",
+  "type": "module",
+  "dependencies": {
+    "@resvg/resvg-js": "^2.6.2"
+  }
+}

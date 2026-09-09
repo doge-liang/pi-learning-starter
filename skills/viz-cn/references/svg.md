@@ -18,17 +18,20 @@ Obsidian 把 `![[attachments/xxx.svg]]` 当作图片嵌入，不会按主题改�
 
 ## 箭头
 
-在 `<defs>` 里定义一次箭头：
+在 `<defs>` 里按颜色各定义一个箭头（不要用 `context-stroke`：Obsidian 的 Chromium 支持它，但 `render_svg` 用的 resvg 不支持，预览会与实际不符）；`markerUnits="userSpaceOnUse"` 让箭头尺寸固定，不随线宽放大：
 
 ```svg
 <defs>
-  <marker id="arrow" viewBox="0 0 10 10" refX="9" refY="5" markerWidth="8" markerHeight="8" orient="auto-start-reverse">
-    <path d="M 0 0 L 10 5 L 0 10 z" fill="context-stroke"/>
+  <marker id="arrow" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#222222"/>
+  </marker>
+  <marker id="arrow-blue" viewBox="0 0 10 10" refX="10" refY="5" markerWidth="12" markerHeight="12" markerUnits="userSpaceOnUse" orient="auto-start-reverse">
+    <path d="M 0 0 L 10 5 L 0 10 z" fill="#1f6feb"/>
   </marker>
 </defs>
 ```
 
-线段用 `marker-end="url(#arrow)"`；`fill="context-stroke"` 让箭头颜色随线条的 `stroke`（Obsidian 的 Chromium 内核支持）；`refX="9"` 使箭尖落在线段终点附近，实际略超出约 1.6 单位，估算边距时可忽略。曲线用 `<path d="M x1 y1 Q cx cy x2 y2"/>`。
+线段用 `marker-end="url(#arrow)"`，蓝线用 `url(#arrow-blue)`，橙线照此再定义 `arrow-orange`；`refX="10"` 使箭尖正好落在线段终点。曲线用 `<path d="M x1 y1 Q cx cy x2 y2"/>`。
 
 ## 最小模板
 
