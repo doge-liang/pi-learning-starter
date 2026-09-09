@@ -1,11 +1,12 @@
 ﻿<#
 .SYNOPSIS
-把仓库 skills\ 下的全部技能（teach-cn、quiz-cn、viz-cn、fact-check-cn）装进 pi 的全局技能目录；可选建立学习目录并放入 AGENTS.md。
+把仓库 skills\ 下的全部技能（teach-cn、quiz-cn、viz-cn、fact-check-cn）装进 pi 的全局技能目录，
+把 extensions\ 下的用户级扩展（quiz、viz-tools）装进全局扩展目录并安装其 npm 依赖；可选建立学习目录并放入 AGENTS.md。
 
 .DESCRIPTION
-全局技能目录取 $env:PI_CODING_AGENT_DIR\skills，未设置时为 $HOME\.pi\agent\skills（pi 的默认）。
-本脚本只管理与仓库 skills\ 同名的目录：安装前先删除同名旧目录，保证被移除的文件不残留；
-其它技能不动。学习目录中已有的 AGENTS.md 默认不覆盖，加 -ForceAgents 才覆盖；maps/、sessions/、
+全局目录取 $env:PI_CODING_AGENT_DIR，未设置时为 $HOME\.pi\agent（pi 的默认）；技能在其 skills\ 下，扩展在 extensions\ 下。
+本脚本只管理与仓库 skills\、extensions\ 同名的目录：安装前先删除同名旧目录，保证被移除的文件不残留；
+其它技能与扩展不动。加 -NoExtensions 只装技能。学习目录中已有的 AGENTS.md 默认不覆盖，加 -ForceAgents 才覆盖；maps/、sessions/、
 attachments/ 只在缺失时创建，既有内容不动。
 
 .EXAMPLE
@@ -18,7 +19,8 @@ attachments/ 只在缺失时创建，既有内容不动。
 #>
 param(
     [string]$LearnDir,
-    [switch]$ForceAgents
+    [switch]$ForceAgents,
+    [switch]$NoExtensions
 )
 
 $ErrorActionPreference = "Stop"
@@ -35,6 +37,33 @@ foreach ($skill in Get-ChildItem (Join-Path $root "skills") -Directory) {
     if (Test-Path $dst) { Remove-Item -Recurse -Force $dst }
     Copy-Item -Recurse $src $dst
     Write-Host "已安装技能 $name -> $dst"
+}
+
+if (-not $NoExtensions) {
+    $extDir = Join-Path $agentDir "extensions"
+    New-Item -ItemType Directory -Force $extDir | Out-Null
+    foreach ($ext in Get-ChildItem (Join-Path $root "extensions") -Directory) {
+        $dst = Join-Path $extDir $ext.Name
+        if (Test-Path $dst) { Remove-Item -Recurse -Force $dst }
+        Copy-Item -Recurse $ext.FullName $dst
+        Write-Host "已安装扩展 $($ext.Name) -> $dst"
+        if (Test-Path (Join-Path $dst "package.json")) {
+            # 扩展的 npm 依赖装在扩展目录里（pi 会从该目录的 node_modules 解析）；失败只提示，不中断。
+            # Windows PowerShell 5.1 在 Stop 策略下，原生命令写 stderr 就会抛错，故局部改为 Continue
+            Push-Location $dst
+            $prevEap = $ErrorActionPreference
+            $ErrorActionPreference = "Continue"
+            $ok = $false
+            try {
+                & npm install --omit=dev --no-audit --no-fund --loglevel=error 2>&1 | Out-Null
+                $ok = ($LASTEXITCODE -eq 0)
+            } finally {
+                $ErrorActionPreference = $prevEap
+                Pop-Location
+            }
+            if ($ok) { Write-Host "  已安装 $($ext.Name) 的依赖" } else { Write-Warning "  $($ext.Name) 的依赖安装失败；稍后可在 $dst 手动执行 npm install" }
+        }
+    }
 }
 
 if ($LearnDir) {

@@ -1,21 +1,27 @@
 /**
- * kit.test.mjs —— 套件自检：纯文件检查，不启动 pi，不调用模型。
+ * kit.test.mjs —— 套件自检：纯文件检查与扩展的纯逻辑测试，不启动 pi，不调用模型。
  *
  * 检查的都是「第一次使用就会暴露」的结构性问题：技能 frontmatter 是否合规（pi 的硬约束），
  * 技能内引用的 references 是否存在且写法可被模型正确解析，依赖图模板是否符合 mermaid 语法约束，
- * 学习目录约定在 AGENTS.md 与 logging.md 之间是否一致，安装脚本的编码，以及语体禁令。
+ * 学习目录约定在 AGENTS.md 与 logging.md 之间是否一致，安装脚本的编码与覆盖范围，语体禁令，
+ * 以及 quiz 与 viz-tools 两个扩展的纯逻辑（打乱与判定、mermaid 静态检查）。
  */
 import assert from "node:assert/strict";
 import { existsSync, readdirSync, readFileSync } from "node:fs";
 import { dirname, join } from "node:path";
 import { describe, it } from "node:test";
 import { fileURLToPath } from "node:url";
+import { IDK, buildQuiz, judge, shuffle } from "../extensions/quiz/logic.mjs";
+import { lintMermaid } from "../extensions/viz-tools/lint.mjs";
 
 const root = join(dirname(fileURLToPath(import.meta.url)), "..");
 const read = (rel) => readFileSync(join(root, rel), "utf8");
-const skillDirs = readdirSync(join(root, "skills"), { withFileTypes: true })
-	.filter((d) => d.isDirectory())
-	.map((d) => d.name);
+const dirsOf = (rel) =>
+	readdirSync(join(root, rel), { withFileTypes: true })
+		.filter((d) => d.isDirectory())
+		.map((d) => d.name);
+const skillDirs = dirsOf("skills");
+const extDirs = dirsOf("extensions");
 const STATES = ["done", "todo", "skip", "defer"];
 
 /** 某技能的 references/*.md 文件名列表；没有该目录则为空 */
@@ -94,21 +100,8 @@ describe("依赖图模板符合 mermaid 语法约束", () => {
 		for (const cls of STATES) assert.match(blocks[0], new RegExp(`classDef ${cls} `));
 	});
 
-	it("节点 id 为 ASCII、标签加双引号、标签内无形状语法字符、状态类合法、每个节点只定义一次", () => {
-		for (const block of blocks) {
-			const defined = new Map();
-			for (const line of block.split(/\r?\n/)) {
-				for (const node of line.matchAll(/([^\s[\]>"-]+)\[([^\]]*)\]/g)) {
-					const [, id, label] = node;
-					assert.match(id, /^[A-Za-z0-9_]+$/, `节点 id 须为 ASCII：${id}`);
-					assert.match(label, /^"[^"]*"$/, `标签须加双引号：${label}`);
-					assert.doesNotMatch(label, /[[\]{}()|$]/, `标签内含形状语法字符：${label}`);
-					assert.ok(!defined.has(id), `节点 ${id} 定义了两次，edit 将失去唯一锚点`);
-					defined.set(id, label);
-				}
-				for (const cls of line.matchAll(/:::(\S+)/g)) assert.ok(STATES.includes(cls[1]), `未知状态类 ${cls[1]}`);
-			}
-		}
+	it("模板通过 viz-tools 的静态检查（与 viz-cn 技能的规则一致）", () => {
+		for (const block of blocks) assert.deepEqual(lintMermaid(block), []);
 	});
 });
 
@@ -148,16 +141,109 @@ describe("语体禁令", () => {
 });
 
 describe("安装脚本", () => {
-	it("PowerShell 与 sh 两版都存在，遍历 skills/ 下全部技能，尊重 PI_CODING_AGENT_DIR", () => {
+	it("PowerShell 与 sh 两版都存在，遍历 skills/ 与 extensions/ 下全部目录，尊重 PI_CODING_AGENT_DIR", () => {
 		const ps1 = read("scripts/install.ps1");
 		const sh = read("scripts/install.sh");
-		assert.ok(ps1.includes("Get-ChildItem (Join-Path $root \"skills\") -Directory"), "install.ps1 应遍历 skills 目录而非硬编码");
+		assert.ok(ps1.includes('Get-ChildItem (Join-Path $root "skills") -Directory'), "install.ps1 应遍历 skills 目录而非硬编码");
+		assert.ok(ps1.includes('Get-ChildItem (Join-Path $root "extensions") -Directory'), "install.ps1 应遍历 extensions 目录");
 		assert.ok(sh.includes('for src in "$root"/skills/*/'), "install.sh 应遍历 skills 目录而非硬编码");
+		assert.ok(sh.includes('for src in "$root"/extensions/*/'), "install.sh 应遍历 extensions 目录");
 		for (const t of [ps1, sh]) assert.ok(t.includes("PI_CODING_AGENT_DIR"), "应尊重 PI_CODING_AGENT_DIR");
 	});
 
 	it("install.ps1 带 UTF-8 BOM：Windows PowerShell 5.1 对无 BOM 的中文脚本按 ANSI 解码，整个文件解析失败", () => {
 		const head = [...readFileSync(join(root, "scripts/install.ps1")).subarray(0, 3)];
 		assert.deepEqual(head, [0xef, 0xbb, 0xbf]);
+	});
+});
+
+describe("扩展结构", () => {
+	it("每个扩展有 index.ts 并注册至少一个工具；有 package.json 者为合法 JSON 且依赖在 dependencies 里", () => {
+		assert.deepEqual([...extDirs].sort(), ["quiz", "viz-tools"]);
+		for (const e of extDirs) {
+			const src = read(`extensions/${e}/index.ts`);
+			assert.match(src, /pi\.registerTool\(\{/, `${e} 未注册工具`);
+			assert.match(src, /from "typebox"/, `${e} 应从 typebox 导入 Type（pi 为扩展提供该别名）`);
+			assert.doesNotMatch(src, /isError\s*:/, `${e}：pi 忽略返回值里的 isError，错误必须 throw`);
+			const pkg = join(root, "extensions", e, "package.json");
+			if (existsSync(pkg)) {
+				const json = JSON.parse(read(`extensions/${e}/package.json`));
+				assert.ok(json.dependencies && !json.devDependencies, "运行时依赖须放在 dependencies（pi 用 --omit=dev 安装）");
+			}
+		}
+	});
+
+	it("技能在工具可用时改走工具：quiz-cn 与 teach-cn 提及 quiz，viz-cn 提及 render_svg 与 check_mermaid", () => {
+		assert.ok(read("skills/quiz-cn/SKILL.md").includes("`quiz`"));
+		assert.ok(read("skills/teach-cn/SKILL.md").includes("`quiz`"));
+		const viz = read("skills/viz-cn/SKILL.md");
+		assert.ok(viz.includes("`render_svg`") && viz.includes("`check_mermaid`"));
+	});
+});
+
+describe("quiz 扩展的纯逻辑", () => {
+	const seq = (values) => {
+		let i = 0;
+		return () => values[i++ % values.length];
+	};
+
+	it("shuffle 不改变元素集合，且可由注入的 rng 决定", () => {
+		assert.deepEqual([...shuffle([1, 2, 3, 4], () => 0)].sort(), [1, 2, 3, 4]);
+		assert.deepEqual(shuffle([1, 2, 3], () => 0), [2, 3, 1]);
+	});
+
+	it("buildQuiz：选项编号、末尾固定附加「我不知道」、order 与 display 一致", () => {
+		const q = buildQuiz({ options: ["甲", "乙", "丙", "丁"], correct: 2 }, seq([0.99, 0.5, 0.1]));
+		assert.equal(q.display.length, 5);
+		assert.equal(q.display[4], `5. ${IDK}`);
+		q.display.slice(0, 4).forEach((d, k) => assert.equal(d, `${k + 1}. ${q.options[q.order[k]]}`));
+		assert.throws(() => buildQuiz({ options: ["只有一个"], correct: 0 }), /至少/);
+		assert.throws(() => buildQuiz({ options: ["甲", "乙"], correct: 5 }), /合法下标/);
+	});
+
+	it("judge：答对、答错、我不知道、取消四种结果", () => {
+		const q = buildQuiz({ options: ["甲", "乙", "丙"], correct: 1 }, () => 0);
+		const correctDisplay = q.display[q.order.indexOf(1)];
+		const wrongDisplay = q.display[q.order.indexOf(0)];
+		assert.equal(judge(q, correctDisplay).status, "correct");
+		const w = judge(q, wrongDisplay);
+		assert.equal(w.status, "wrong");
+		assert.equal(w.pickedText, "甲");
+		assert.equal(w.correctText, "乙");
+		assert.equal(judge(q, `4. ${IDK}`).status, "unknown");
+		assert.equal(judge(q, "不存在的选项").status, "cancelled");
+	});
+});
+
+describe("viz-tools 的 mermaid 静态检查", () => {
+	it("合规的依赖图通过", () => {
+		const ok = 'graph TD\n  classDef done fill:#e5e5e5\n  n1["余向量：线性泛函"]:::done --> n2["余向量场"]:::todo\n  n2 --> n3["沿曲线积分"]:::todo';
+		assert.deepEqual(lintMermaid(ok), []);
+	});
+
+	it("抓出未加引号的标签、标签内形状字符、非 ASCII id、重复定义、括号不平衡、未知样式类", () => {
+		const bad = 'graph TD\n  n1[余向量] --> 节点2["x"]\n  n1["余向量 (dual)"]:::pending --> n3["a|b"';
+		const msgs = lintMermaid(bad).map((p) => p.message);
+		assert.ok(msgs.some((m) => m.includes("双引号")));
+		assert.ok(msgs.some((m) => m.includes("ASCII")));
+		assert.ok(msgs.some((m) => m.includes("已在第")));
+		assert.ok(msgs.some((m) => m.includes("[ ] ( ) { } | $")));
+		assert.ok(msgs.some((m) => m.includes("不平衡")));
+		assert.ok(msgs.some((m) => m.includes("未知样式类")));
+	});
+
+	it("sequenceDiagram 与 stateDiagram-v2：参与者引号、消息与转移标签里的半角分号井号", () => {
+		const seqBad = 'sequenceDiagram\n  participant A as "客户端"\n  A->>B: 发送 SYN; 等待';
+		const seqMsgs = lintMermaid(seqBad).map((p) => p.message);
+		assert.ok(seqMsgs.some((m) => m.includes("参与者框")));
+		assert.ok(seqMsgs.some((m) => m.includes("消息文本")));
+		const stateBad = 'stateDiagram-v2\n  state "关闭" as s1\n  s1 --> s2: 事件; 动作';
+		assert.ok(lintMermaid(stateBad).some((p) => p.message.includes("转移标签")));
+		assert.deepEqual(lintMermaid("sequenceDiagram\n  participant A as 客户端\n  A->>B: 发送 SYN"), []);
+	});
+
+	it("无法识别的图类型与空内容", () => {
+		assert.ok(lintMermaid("chart XY\n a --> b").some((p) => p.message.includes("无法识别")));
+		assert.ok(lintMermaid("  \n").some((p) => p.message.includes("为空")));
 	});
 });
