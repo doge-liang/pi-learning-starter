@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/doge-liang/pi-learning-starter/actions/workflows/ci.yml/badge.svg)](https://github.com/doge-liang/pi-learning-starter/actions/workflows/ci.yml)
 
-一套只由 markdown 构成的一对一教学配置，运行在 [pi](https://github.com/badlogic/pi-mono) 上：`teach-cn` 技能按「摸底 → 规划 → 单步教学」三阶段讲授任意主题，先用逐题测验定位你理解的边缘，再给出依赖图供你确认，然后每次只推进一个推理步并当场检验；整个过程写成 Obsidian 库里的笔记（会话记录、依赖图、学习者档案），公式与 mermaid 图在 Obsidian 中实时渲染。`fact-check-cn` 技能负责对具体断言做分级核查。
+一套只由 markdown 构成的一对一教学配置，运行在 [pi](https://github.com/badlogic/pi-mono) 上，由四个技能组成：`teach-cn` 按「摸底 → 规划 → 单步教学」三阶段讲授任意主题，先用逐题测验定位你理解的边缘，再给出依赖图供你确认，然后每次只推进一个推理步并当场检验；`quiz-cn` 随时出题只测不讲；`viz-cn` 为概念生成最小化图示（mermaid 或 SVG）；`fact-check-cn` 对具体断言做分级核查。整个过程写成 Obsidian 库里的笔记（会话记录、依赖图、学习者档案、图示），公式、mermaid 与 SVG 在 Obsidian 中实时渲染。
 
 不含任何可执行代码，不需要 pi 的项目信任流程。教学方法参考 [amosblomqvist/learn](https://github.com/amosblomqvist/learn)，此处为纯 markdown 的中文本地化改写，不包含该仓库的扩展与子代理。本套件此前的复杂实现（八角色多实例 hub、Obsidian 插件、JSON 黑板）保留在分支 `archive/hub` 与标签 `v0-hub`；后续按需补回的功能见 [ROADMAP.md](ROADMAP.md)。
 
@@ -42,12 +42,12 @@ npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 
 若提示 running scripts is disabled，改用 `powershell -ExecutionPolicy Bypass -File .\scripts\install.ps1 -LearnDir D:\Knowledge\PiLearn`（PowerShell 7 用 `pwsh -ExecutionPolicy Bypass -File …`）。
 
-脚本把 `skills\teach-cn` 与 `skills\fact-check-cn` 复制到 pi 的全局技能目录 `$HOME\.pi\agent\skills`（设置了 `PI_CODING_AGENT_DIR` 时以它为准），在学习目录下建立 `maps\`、`sessions\`、`attachments\` 并放入 `AGENTS.md`；重复执行是安全的，已有的 `AGENTS.md` 不覆盖（加 `-ForceAgents` 才覆盖）。等价的手动步骤：
+脚本把 `skills\` 下的全部技能复制到 pi 的全局技能目录 `$HOME\.pi\agent\skills`（设置了 `PI_CODING_AGENT_DIR` 时以它为准），在学习目录下建立 `maps\`、`sessions\`、`attachments\` 并放入 `AGENTS.md`；重复执行是安全的，已有的 `AGENTS.md` 不覆盖（加 `-ForceAgents` 才覆盖）。等价的手动步骤：
 
 ```powershell
 $skills = Join-Path $HOME ".pi\agent\skills"
 New-Item -ItemType Directory -Force $skills | Out-Null
-foreach ($name in "teach-cn", "fact-check-cn") {
+foreach ($name in "teach-cn", "quiz-cn", "viz-cn", "fact-check-cn") {
     Remove-Item -Recurse -Force (Join-Path $skills $name) -ErrorAction Ignore   # 目标已存在时 Copy-Item 会把目录嵌套进去，先删
     Copy-Item -Recurse ".\skills\$name" (Join-Path $skills $name)
 }
@@ -80,13 +80,16 @@ pi
 
 接下来按提示走：回答摸底题，一次一道；在 Obsidian 里看依赖图并确认；然后一步一步往下学。同时在 Obsidian 中打开 `PiLearn/sessions/` 下当天的文件，公式与 mermaid 图会实时渲染。若 `/skill:teach-cn` 不可用，在 `/settings` 里确认「Skill commands」已开启（默认开启）。
 
-三种进入方式：
+四个技能的调用方式（也可以用自然语言，`AGENTS.md` 已把「考考我」「画个图」「核实一下」映射到对应技能）：
 
 | 你说 | 发生什么 |
 |---|---|
 | `/skill:teach-cn <主题或目标>` | 建档、摸底、规划、教学，直到收尾 |
 | `/skill:teach-cn 只摸底 <主题>` | 摸底后写入档案即停，下次直接从规划开始 |
 | `/skill:teach-cn 继续 <主题>` | 读取上次的依赖图与记录，复核薄弱与暂缓节点后接着讲 |
+| `/skill:quiz-cn [范围] [题数]` | 只测不讲：一次一道单选题，答后立即判定；结束给得分、逐题清单与薄弱点，写入当日记录与档案。范围缺省先取今天学过的节点，题数有余时补档案里的薄弱点；题数缺省五道 |
+| `/skill:viz-cn <对象>` | 为一个概念、结构或过程画一张最小化图示：关系与流程用 mermaid 嵌入笔记，几何与坐标用 SVG 写入 `attachments/`，生成后做源码级自检 |
+| `/skill:fact-check-cn <说法>` | 断言重述、类别、判定与失效条件；无法核实时明确标注未核验 |
 
 ## 五、常用操作（Windows 默认按键）
 
@@ -156,6 +159,8 @@ WSL 下 pi 同样使用 Windows 风格按键（`Ctrl+Q`、`Alt+Q`、`Alt+V`）�
 AGENTS.md                         学习目录约定（复制到学习目录根部）
 skills/teach-cn/SKILL.md          教学技能：三阶段流程、单步展开、答错处理、收尾
 skills/teach-cn/references/       logging.md 文件模板与写入时机；subjects.md 分学科约定；fact-check.md 讲授中的事实纪律
+skills/quiz-cn/SKILL.md           随时测验技能
+skills/viz-cn/SKILL.md            最小化图示技能；references/svg.md 是 SVG 规则与自检清单
 skills/fact-check-cn/SKILL.md     断言核查技能
 scripts/install.ps1 / install.sh  安装脚本
 tests/kit.test.mjs                套件自检（npm test）

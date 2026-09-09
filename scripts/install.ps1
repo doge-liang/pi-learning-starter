@@ -1,10 +1,10 @@
 ﻿<#
 .SYNOPSIS
-把 teach-cn 与 fact-check-cn 装进 pi 的全局技能目录；可选建立学习目录并放入 AGENTS.md。
+把仓库 skills\ 下的全部技能（teach-cn、quiz-cn、viz-cn、fact-check-cn）装进 pi 的全局技能目录；可选建立学习目录并放入 AGENTS.md。
 
 .DESCRIPTION
 全局技能目录取 $env:PI_CODING_AGENT_DIR\skills，未设置时为 $HOME\.pi\agent\skills（pi 的默认）。
-本脚本只管理 teach-cn 与 fact-check-cn 两个目录：安装前先删除同名旧目录，保证被移除的文件不残留；
+本脚本只管理与仓库 skills\ 同名的目录：安装前先删除同名旧目录，保证被移除的文件不残留；
 其它技能不动。学习目录中已有的 AGENTS.md 默认不覆盖，加 -ForceAgents 才覆盖；maps/、sessions/、
 attachments/ 只在缺失时创建，既有内容不动。
 
@@ -27,8 +27,9 @@ $agentDir = if ($env:PI_CODING_AGENT_DIR) { $env:PI_CODING_AGENT_DIR } else { Jo
 $skillsDir = Join-Path $agentDir "skills"
 New-Item -ItemType Directory -Force $skillsDir | Out-Null
 
-foreach ($name in @("teach-cn", "fact-check-cn")) {
-    $src = Join-Path $root "skills\$name"
+foreach ($skill in Get-ChildItem (Join-Path $root "skills") -Directory) {
+    $name = $skill.Name
+    $src = $skill.FullName
     $dst = Join-Path $skillsDir $name
     if (-not (Test-Path (Join-Path $src "SKILL.md"))) { throw "找不到技能源目录：$src" }
     if (Test-Path $dst) { Remove-Item -Recurse -Force $dst }

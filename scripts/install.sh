@@ -1,8 +1,8 @@
 #!/usr/bin/env sh
-# 把 teach-cn 与 fact-check-cn 装进 pi 的全局技能目录；可选建立学习目录并放入 AGENTS.md。
-# 用法：sh scripts/install.sh [学习目录]
+# 把仓库 skills/ 下的全部技能（teach-cn、quiz-cn、viz-cn、fact-check-cn）装进 pi 的全局技能目录；
+# 可选建立学习目录并放入 AGENTS.md。用法：sh scripts/install.sh [学习目录]
 # 全局技能目录取 $PI_CODING_AGENT_DIR/skills，未设置时为 ~/.pi/agent/skills（pi 的默认）。
-# 只管理 teach-cn 与 fact-check-cn 两个目录（安装前先删除同名旧目录）；学习目录中已有的 AGENTS.md 不覆盖。
+# 只管理与仓库 skills/ 同名的目录（安装前先删除同名旧目录）；学习目录中已有的 AGENTS.md 不覆盖。
 set -eu
 
 root="$(cd "$(dirname "$0")/.." && pwd)"
@@ -10,8 +10,9 @@ agent_dir="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
 skills_dir="$agent_dir/skills"
 mkdir -p "$skills_dir"
 
-for name in teach-cn fact-check-cn; do
-  src="$root/skills/$name"
+for src in "$root"/skills/*/; do
+  src="${src%/}"
+  name="$(basename "$src")"
   dst="$skills_dir/$name"
   [ -f "$src/SKILL.md" ] || { echo "找不到技能源目录：$src" >&2; exit 1; }
   rm -rf "$dst"

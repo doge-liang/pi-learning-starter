@@ -18,6 +18,12 @@ const skillDirs = readdirSync(join(root, "skills"), { withFileTypes: true })
 	.map((d) => d.name);
 const STATES = ["done", "todo", "skip", "defer"];
 
+/** 某技能的 references/*.md 文件名列表；没有该目录则为空 */
+function refsOf(skill) {
+	const dir = join(root, "skills", skill, "references");
+	return existsSync(dir) ? readdirSync(dir).filter((f) => f.endsWith(".md")) : [];
+}
+
 /** 解析 SKILL.md 顶部的 YAML 头：只支持 key: value 单行形式，足够本套件使用 */
 function frontmatter(text) {
 	const m = /^---\r?\n([\s\S]*?)\r?\n---/.exec(text);
@@ -31,6 +37,9 @@ function frontmatter(text) {
 }
 
 describe("技能 frontmatter 符合 pi 的约束", () => {
+	it("套件包含四个技能", () => {
+		assert.deepEqual([...skillDirs].sort(), ["fact-check-cn", "quiz-cn", "teach-cn", "viz-cn"]);
+	});
 	for (const dir of skillDirs) {
 		it(`${dir}：name 与目录同名、合法；description 非空、不超过 1024 字符、无 YAML 特殊序列`, () => {
 			const fm = frontmatter(read(`skills/${dir}/SKILL.md`));
@@ -46,32 +55,33 @@ describe("技能 frontmatter 符合 pi 的约束", () => {
 });
 
 describe("references 引用可被解析", () => {
-	const skill = "skills/teach-cn";
-	const refDir = join(root, skill, "references");
-	const refFiles = readdirSync(refDir).filter((f) => f.endsWith(".md"));
-	const texts = [read(`${skill}/SKILL.md`), ...refFiles.map((f) => read(`${skill}/references/${f}`))];
+	for (const skill of skillDirs) {
+		const refFiles = refsOf(skill);
+		if (!refFiles.length) continue;
+		const texts = [read(`skills/${skill}/SKILL.md`), ...refFiles.map((f) => read(`skills/${skill}/references/${f}`))];
 
-	it("每个 `references/xxx.md` 引用都指向存在的文件", () => {
-		for (const t of texts) {
-			for (const m of t.matchAll(/`references\/([a-z0-9-]+\.md)`/g)) {
-				assert.ok(existsSync(join(refDir, m[1])), `引用了不存在的 references/${m[1]}`);
+		it(`${skill}：每个 \`references/xxx.md\` 引用都指向存在的文件`, () => {
+			for (const t of texts) {
+				for (const m of t.matchAll(/`references\/([a-z0-9-]+\.md)`/g)) {
+					assert.ok(refFiles.includes(m[1]), `引用了不存在的 references/${m[1]}`);
+				}
 			}
-		}
-	});
+		});
 
-	it("不出现省略 references/ 前缀的裸文件名引用（模型会按技能目录解析而找不到）", () => {
-		for (const t of texts) {
-			for (const f of refFiles) {
-				const bare = new RegExp(`(?<![\\w/])\`${f.replace(".", "\\.")}\``);
-				assert.ok(!bare.test(t), `裸引用 \`${f}\` 应写作 \`references/${f}\``);
+		it(`${skill}：不出现省略 references/ 前缀的裸文件名引用（模型会按技能目录解析而找不到）`, () => {
+			for (const t of texts) {
+				for (const f of refFiles) {
+					const bare = new RegExp(`(?<![\\w/])\`${f.replace(".", "\\.")}\``);
+					assert.ok(!bare.test(t), `裸引用 \`${f}\` 应写作 \`references/${f}\``);
+				}
 			}
-		}
-	});
+		});
 
-	it("SKILL.md 列出的参考文件与 references/ 目录一致", () => {
-		const skillText = read(`${skill}/SKILL.md`);
-		for (const f of refFiles) assert.ok(skillText.includes(`references/${f}`), `SKILL.md 未提及 references/${f}`);
-	});
+		it(`${skill}：SKILL.md 提及 references/ 下的每个文件`, () => {
+			const skillText = read(`skills/${skill}/SKILL.md`);
+			for (const f of refFiles) assert.ok(skillText.includes(`references/${f}`), `SKILL.md 未提及 references/${f}`);
+		});
+	}
 });
 
 describe("依赖图模板符合 mermaid 语法约束", () => {
@@ -112,18 +122,20 @@ describe("学习目录约定在 AGENTS.md、logging.md 与 README 之间一致",
 		}
 	});
 
-	it("AGENTS.md 声明对上级目录约定的优先权；README 要求在学习目录内启动 pi", () => {
-		assert.ok(read("AGENTS.md").includes("优先"), "应声明本文件优先于上级目录的约定");
+	it("AGENTS.md 声明对上级目录约定的优先权并映射四个技能；README 要求在学习目录内启动 pi", () => {
+		const agents = read("AGENTS.md");
+		assert.ok(agents.includes("优先"), "应声明本文件优先于上级目录的约定");
+		for (const s of skillDirs) assert.ok(agents.includes(`\`${s}\``), `AGENTS.md 未提及技能 ${s}`);
 		assert.ok(read("README.md").includes("必须在学习目录"), "README 应要求在学习目录内启动 pi");
 	});
 });
 
 describe("语体禁令", () => {
-	const files = [
-		"AGENTS.md",
-		...skillDirs.map((d) => `skills/${d}/SKILL.md`),
-		...readdirSync(join(root, "skills/teach-cn/references")).map((f) => `skills/teach-cn/references/${f}`),
-	];
+	const files = ["AGENTS.md"];
+	for (const s of skillDirs) {
+		files.push(`skills/${s}/SKILL.md`);
+		for (const f of refsOf(s)) files.push(`skills/${s}/references/${f}`);
+	}
 	for (const f of files) {
 		it(`${f}：不含感叹号、对勾叉号与 emoji`, () => {
 			const t = read(f);
@@ -136,12 +148,12 @@ describe("语体禁令", () => {
 });
 
 describe("安装脚本", () => {
-	it("PowerShell 与 sh 两版都存在，且只管理本套件的两个技能目录、尊重 PI_CODING_AGENT_DIR", () => {
-		for (const s of ["scripts/install.ps1", "scripts/install.sh"]) {
-			const t = read(s);
-			assert.ok(t.includes("teach-cn") && t.includes("fact-check-cn"));
-			assert.ok(t.includes("PI_CODING_AGENT_DIR"), `${s} 应尊重 PI_CODING_AGENT_DIR`);
-		}
+	it("PowerShell 与 sh 两版都存在，遍历 skills/ 下全部技能，尊重 PI_CODING_AGENT_DIR", () => {
+		const ps1 = read("scripts/install.ps1");
+		const sh = read("scripts/install.sh");
+		assert.ok(ps1.includes("Get-ChildItem (Join-Path $root \"skills\") -Directory"), "install.ps1 应遍历 skills 目录而非硬编码");
+		assert.ok(sh.includes('for src in "$root"/skills/*/'), "install.sh 应遍历 skills 目录而非硬编码");
+		for (const t of [ps1, sh]) assert.ok(t.includes("PI_CODING_AGENT_DIR"), "应尊重 PI_CODING_AGENT_DIR");
 	});
 
 	it("install.ps1 带 UTF-8 BOM：Windows PowerShell 5.1 对无 BOM 的中文脚本按 ANSI 解码，整个文件解析失败", () => {
