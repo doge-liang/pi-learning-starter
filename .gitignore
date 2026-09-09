@@ -1,28 +1,3 @@
-.pi/learning-handoff.json
-cron.log
 node_modules/
-*.tsbuildinfo
-obsidian-plugin/dist/
-
-# 学习者的运行时数据不进 starter 仓库（提案、评审、证据、测评、复盘、产出物）
-blackboard/proposals/*
-!blackboard/proposals/.gitkeep
-blackboard/evidence/*
-!blackboard/evidence/.gitkeep
-blackboard/assessments/*
-!blackboard/assessments/.gitkeep
-blackboard/reflections/*
-!blackboard/reflections/README.md
-blackboard/artifacts/*
-!blackboard/artifacts/README.md
-!blackboard/artifacts/reviews/
-blackboard/artifacts/reviews/*
-!blackboard/artifacts/reviews/.gitkeep
-blackboard/exemplars/*
-!blackboard/exemplars/.gitkeep
-blackboard/placement/*
-!blackboard/placement/.gitkeep
-
-# 本地资料副本与 Zotero 导入文件：体量大且多为受版权保护的原件，绝不进版本库
-blackboard/library/*
-!blackboard/library/.gitkeep
+.DS_Store
+Thumbs.db
