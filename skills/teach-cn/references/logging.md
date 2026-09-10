@@ -10,8 +10,11 @@ PiLearn/
 ├── LEARNER.md                         学习者档案，跨会话累积
 ├── maps/<slug>.md                      依赖图
 ├── sessions/YYYY-MM-DD-<slug>.md       会话记录
-└── attachments/                       SVG 与其他图像
+├── attachments/                       SVG 与其他图像
+└── archive/                           迁入的参考材料，只读
 ```
+
+`archive/` 里是从旧系统或别处迁入的材料（画像、旧试卷、旧转写等）：可以读、可以作为出题与规划的参考，但不构成掌握度依据，也不要往里写新内容。
 
 每个主题有一个 slug 作为文件名：优先用通行的英文名（`differential-forms`），没有通行英文名才用拼音（`ci-yu-qian-ru`），短横线连接、全小写，避免与库中既有笔记同名，一经写入不再更改。slug 记在会话文件与地图文件的 frontmatter，以及 `LEARNER.md`「未竟」条目的括号里，续学时据此定位文件。同一主题多次会话时，日期不同即为不同文件；同日同主题的第二次会话加序号后缀（`-2`），写入前执行 `ls sessions` 检查。地图文件原地更新。
 
