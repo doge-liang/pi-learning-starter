@@ -4,6 +4,7 @@
   "private": true,
   "description": "pi 学习套件：四个中文一对一教学技能（teach-cn、quiz-cn、viz-cn、fact-check-cn）与两个用户级扩展（quiz、viz-tools），产物写入 Obsidian 库",
   "keywords": ["pi", "obsidian", "learning", "tutoring", "skills"],
+  "license": "MIT",
   "repository": {
     "type": "git",
     "url": "https://github.com/doge-liang/pi-learning-starter.git"

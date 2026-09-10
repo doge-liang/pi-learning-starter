@@ -177,6 +177,10 @@ WSL 下 pi 同样使用 Windows 风格按键（`Ctrl+Q`、`Alt+Q`、`Alt+V`）�
 - `/model` 选择器按 `Enter` 即存为默认，没有 `Ctrl+S`。
 - Windows 上后续消息是 `Alt+Enter`（与 Windows Terminal 的全屏快捷键冲突，需在其设置中把 `alt+enter` 重映射为 `sendInput "\u001b[13;3u"`），取回是 `Alt+Up`，撤销是 `Ctrl+-`，粘贴图片是 `Ctrl+V`，反向切换模型是 `Shift+Ctrl+P`。
 
+## 许可
+
+MIT，见 [LICENSE](LICENSE)。教学方法的来源 amosblomqvist/learn 另有其自身的许可，本仓库不包含其代码。
+
 ## 仓库结构
 
 ```
@@ -192,4 +196,5 @@ scripts/install.ps1 / install.sh  安装脚本（技能、扩展及其依赖、�
 scripts/learn.ps1 / learn.sh      一键启动：切到学习目录，只带四个技能启动 pi
 tests/kit.test.mjs                套件自检（npm test）
 ROADMAP.md                        以后缺了再加的功能清单
+LICENSE                           MIT
 ```
