@@ -11,7 +11,7 @@ compatibility: 需在学习目录中运行（目录含 LEARNER.md 或 sessions/�
 
 ## 路径约定
 
-`attachments/`、`sessions/` 相对当前工作目录（学习目录）；`references/…` 相对本技能目录。不在技能目录内创建或修改任何文件。当前目录不存在 `sessions/` 或 `LEARNER.md` 时，先问学习者学习目录在哪，不要就地创建 `attachments/`。开始前取得日期与时刻，不凭印象：客户端已在上下文里给出当天日期时直接采用；否则用终端工具执行 `date +%F` 与 `date +%H:%M`，若报参数或语法错误说明当前是 PowerShell，改用 `Get-Date -Format 'yyyy-MM-dd'` 与 `Get-Date -Format 'HH:mm'`；都不可用时问学习者。
+`attachments/`、`sessions/` 相对当前工作目录（学习目录）；`references/…` 相对本技能目录。不在技能目录内创建或修改任何文件。当前目录不存在 `sessions/` 或 `LEARNER.md` 时，先问学习者学习目录在哪，不要就地创建 `attachments/`。开始前取得日期与时刻，一律实测：不凭印象，也不采用上下文里出现的日期（那是会话开始时的快照，长会话会过期）。用终端工具执行 `date +%F` 与 `date +%H:%M`，若报参数或语法错误说明当前是 PowerShell，改用 `Get-Date -Format 'yyyy-MM-dd'` 与 `Get-Date -Format 'HH:mm'`；没有终端工具时问学习者。
 
 ## 选型
 
