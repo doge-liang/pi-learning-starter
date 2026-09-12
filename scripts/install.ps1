@@ -9,6 +9,10 @@
 其它技能与扩展不动。加 -NoExtensions 只装技能。学习目录中已有的 AGENTS.md 默认不覆盖，加 -ForceAgents 才覆盖；maps/、sessions/、
 attachments/ 只在缺失时创建，既有内容不动。
 
+加 -WorkspaceSkills 时，同一份技能再装一份到 <LearnDir>\.agents\skills\。那是跨客户端的工作区级技能位置：
+Antigravity 从当前目录向上查找 .agents/skills 并把其中的技能注册成 /<技能名> 斜杠命令，pi 也认同一约定。
+好处是技能连同 references/ 都落在工作区内，不会撞上「非工作区文件需审批」的边界。该开关需要同时给 -LearnDir。
+
 .EXAMPLE
 .\scripts\install.ps1
 只安装技能。
@@ -16,28 +20,38 @@ attachments/ 只在缺失时创建，既有内容不动。
 .EXAMPLE
 .\scripts\install.ps1 -LearnDir D:\Knowledge\PiLearn
 安装技能，并在 Obsidian 库内建立学习目录。
+
+.EXAMPLE
+.\scripts\install.ps1 -LearnDir D:\Knowledge\PiLearn -WorkspaceSkills
+同上，并把技能装进 D:\Knowledge\PiLearn\.agents\skills\ 供 Antigravity 等客户端在该工作区内发现。
 #>
 param(
     [string]$LearnDir,
     [switch]$ForceAgents,
-    [switch]$NoExtensions
+    [switch]$NoExtensions,
+    [switch]$WorkspaceSkills
 )
 
 $ErrorActionPreference = "Stop"
 $root = Split-Path -Parent $PSScriptRoot
 $agentDir = if ($env:PI_CODING_AGENT_DIR) { $env:PI_CODING_AGENT_DIR } else { Join-Path $HOME ".pi\agent" }
 $skillsDir = Join-Path $agentDir "skills"
-New-Item -ItemType Directory -Force $skillsDir | Out-Null
 
-foreach ($skill in Get-ChildItem (Join-Path $root "skills") -Directory) {
-    $name = $skill.Name
-    $src = $skill.FullName
-    $dst = Join-Path $skillsDir $name
-    if (-not (Test-Path (Join-Path $src "SKILL.md"))) { throw "找不到技能源目录：$src" }
-    if (Test-Path $dst) { Remove-Item -Recurse -Force $dst }
-    Copy-Item -Recurse $src $dst
-    Write-Host "已安装技能 $name -> $dst"
+function Install-Skills([string]$TargetDir) {
+    New-Item -ItemType Directory -Force $TargetDir | Out-Null
+    foreach ($skill in Get-ChildItem (Join-Path $root "skills") -Directory) {
+        $src = $skill.FullName
+        $dst = Join-Path $TargetDir $skill.Name
+        if (-not (Test-Path (Join-Path $src "SKILL.md"))) { throw "找不到技能源目录：$src" }
+        if (Test-Path $dst) { Remove-Item -Recurse -Force $dst }
+        Copy-Item -Recurse $src $dst
+        Write-Host "已安装技能 $($skill.Name) -> $dst"
+    }
 }
+
+if ($WorkspaceSkills -and -not $LearnDir) { throw "-WorkspaceSkills 需要同时给 -LearnDir，指明装到哪个工作区" }
+
+Install-Skills $skillsDir
 
 if (-not $NoExtensions) {
     $extDir = Join-Path $agentDir "extensions"
@@ -76,6 +90,10 @@ if ($LearnDir) {
         Write-Host "已写入 $agents"
     } else {
         Write-Host "已存在 $agents，未覆盖（加 -ForceAgents 覆盖）"
+    }
+    if ($WorkspaceSkills) {
+        Install-Skills (Join-Path $LearnDir ".agents\skills")
+        Write-Host "工作区技能就绪：把 $LearnDir 作为项目打开，技能即以 /<技能名> 的形式可用。"
     }
     Write-Host "学习目录就绪：$LearnDir。在该目录中运行 pi（pi 只向上查找 AGENTS.md，不要在库根启动）。"
 }

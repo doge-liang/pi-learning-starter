@@ -4,7 +4,7 @@
 
 一套以 markdown 为主的一对一教学配置，运行在 [pi](https://github.com/badlogic/pi-mono) 上，由四个技能组成：`teach` 按「摸底 → 规划 → 单步教学」三阶段讲授任意主题，先用逐题测验定位你理解的边缘，再给出依赖图供你确认，然后每次只推进一个推理步并当场检验；`quiz` 随时出题只测不讲；`viz` 为概念生成最小化图示（mermaid 或 SVG）；`fact-check` 对具体断言做分级核查。整个过程写成 Obsidian 库里的笔记（会话记录、依赖图、学习者档案、图示），公式、mermaid 与 SVG 在 Obsidian 中实时渲染。
 
-技能部分只由 markdown 构成，不触发 pi 的项目信任流程；第九节的两个扩展是可选的用户级 TypeScript 扩展（代码在本仓库 `extensions/`，随时可读），不想装时用 `-NoExtensions`。教学方法参考 [amosblomqvist/learn](https://github.com/amosblomqvist/learn)，此处为中文本地化改写，不使用该仓库的扩展与子代理（测验与可视化改由本仓库自带的两个轻量扩展实现，事实核查改用免密钥的公开 API）。本套件此前的复杂实现（八角色多实例 hub、Obsidian 插件、JSON 黑板）保留在分支 `archive/hub` 与标签 `v0-hub`；后续按需补回的功能见 [ROADMAP.md](ROADMAP.md)。
+技能部分只由 markdown 构成，不触发 pi 的项目信任流程；第十节的两个扩展是可选的用户级 TypeScript 扩展（代码在本仓库 `extensions/`，随时可读），不想装时用 `-NoExtensions`。教学方法参考 [amosblomqvist/learn](https://github.com/amosblomqvist/learn)，此处为中文本地化改写，不使用该仓库的扩展与子代理（测验与可视化改由本仓库自带的两个轻量扩展实现，事实核查改用免密钥的公开 API）。本套件此前的复杂实现（八角色多实例 hub、Obsidian 插件、JSON 黑板）保留在分支 `archive/hub` 与标签 `v0-hub`；后续按需补回的功能见 [ROADMAP.md](ROADMAP.md)。
 
 本文以 Windows 11 原生环境（PowerShell、Windows Terminal）与 pi 0.84.4 为准；WSL 与 macOS 见附录。
 
@@ -147,7 +147,36 @@ WSL 与 macOS 用 `alias learn='sh <本仓库路径>/scripts/learn.sh'`。
 
 修改后重新执行安装脚本（或直接改 `$HOME\.pi\agent\skills` 里的副本），在 pi 中 `/reload` 生效。`npm test` 运行套件自检（frontmatter、引用路径、mermaid 模板约束、语体禁令、两个扩展的纯逻辑），零依赖。
 
-## 九、随套件安装的两个用户级扩展
+## 九、在别的客户端里使用（Antigravity 等）
+
+四个技能遵循 [Agent Skills 开放标准](https://agentskills.io)，官方校验器 `skills-ref validate` 四个都通过，因此支持该标准的客户端都能直接用。两种装法：
+
+**装进工作区（推荐）。** 加 `-WorkspaceSkills`，技能会多装一份到学习目录的 `.agents\skills\`：
+
+```powershell
+.\scripts\install.ps1 -LearnDir D:\Knowledge\PiLearn -WorkspaceSkills
+```
+
+`.agents/skills` 是跨客户端的工作区级约定，客户端从当前目录向上查找它。把学习目录作为项目打开后，技能以 `/teach`、`/quiz`、`/viz`、`/fact-check` 的形式可用，也会按 description 自动匹配。这条路的好处是技能连同 `references/` 全在工作区内，不会撞上「非工作区文件需要审批」的边界；代价是每个学习目录一份拷贝，重跑脚本即可更新。sh 版设 `WORKSPACE_SKILLS=1` 并给学习目录。
+
+**全局注册（零拷贝）。** Antigravity 支持用 JSON 显式登记非默认位置的技能目录。新建 `%USERPROFILE%\.gemini\config\skills.json`：
+
+```json
+{
+  "entries": [
+    {
+      "path": "~/.pi/agent/skills",
+      "include_only": ["^teach$", "^quiz$", "^viz$", "^fact-check$"]
+    }
+  ]
+}
+```
+
+pi 与 Antigravity 从此共用同一份文件，`install.ps1` 不必改；`include_only` 是按目录名匹配的正则，把该目录下的其它技能挡在外面。注意 `~/.pi/agent/skills` 在工作区之外，模型按需读 `references/` 时可能触发文件访问审批——真遇到就在 Permissions 里给该目录加一条 read 允许规则，或改用上面的工作区装法。
+
+技能里凡是宿主相关的地方都做了降级：取日期先试 `date +%F`，报错即改用 PowerShell 的 `Get-Date -Format`；`quiz`、`render_svg`、`check_mermaid` 这些工具不存在时退回对话式出题与源码级自检；写文件前会先确认当前目录确实是学习目录（有 `LEARNER.md` 或 `sessions/`），否则先问，不会在无关仓库里建目录。
+
+## 十、随套件安装的两个用户级扩展
 
 安装脚本会把 `extensions\` 下的两个扩展复制到 `$HOME\.pi\agent\extensions\`（用户级扩展不经过项目信任流程；代码就在本仓库里，随时可读）：
 
@@ -156,7 +185,7 @@ WSL 与 macOS 用 `alias learn='sh <本仓库路径>/scripts/learn.sh'`。
 
 不想装扩展时用 `.\scripts\install.ps1 -NoExtensions`（sh 版设 `NO_EXTENSIONS=1`）。事实核查不需要扩展：`fact-check` 用 `curl` 查免密钥的公开 API（Crossref、OpenAlex、arXiv、Wikipedia、npm 等，见 `skills/fact-check/references/verify.md`），`AGENTS.md` 的安全边界已允许这类只读请求。
 
-## 十、可选增强
+## 十一、可选增强
 
 - **联网核查**：安装 [badlogic/pi-skills](https://github.com/badlogic/pi-skills) 的 `brave-search` 技能，`fact-check` 会自动利用它。只复制这一个技能，整个仓库放进技能目录会让其中全部技能都进入系统提示：`git clone https://github.com/badlogic/pi-skills $env:TEMP\pi-skills`，然后 `Copy-Item -Recurse $env:TEMP\pi-skills\brave-search "$HOME\.pi\agent\skills\brave-search"`，在 `$HOME\.pi\agent\skills\brave-search` 里 `npm install`；需要 Brave 的 API key。
 - **原仓库的扩展**（测验弹窗、子代理事实核查与自动图示）依赖 [pi-interactive-subagents](https://github.com/amosblomqvist/pi-interactive-subagents)，而它只支持 tmux，Windows 原生下不可用；需要时在 WSL 中另行搭建，并注意 pi 没有沙箱，信任一个含 `extensions/` 的 `.pi` 目录等于允许其中代码在你的机器上执行，启用前先通读。
@@ -192,7 +221,7 @@ skills/viz/SKILL.md            最小化图示技能；references/svg.md 是 SVG
 skills/fact-check/SKILL.md     断言核查技能；references/verify.md 是免密钥核查渠道与 curl 用法
 extensions/quiz/                  quiz 工具：打乱选项、弹出选择框、即时判定（index.ts 接 pi，logic.mjs 是纯逻辑）
 extensions/viz-tools/             render_svg 与 check_mermaid 工具（package.json 声明 @resvg/resvg-js）
-scripts/install.ps1 / install.sh  安装脚本（技能、扩展及其依赖、学习目录）
+scripts/install.ps1 / install.sh  安装脚本（技能、扩展及其依赖、学习目录；-WorkspaceSkills 另装一份到 <学习目录>/.agents/skills）
 scripts/learn.ps1 / learn.sh      一键启动：切到学习目录，只带四个技能启动 pi
 tests/kit.test.mjs                套件自检（npm test）
 ROADMAP.md                        以后缺了再加的功能清单

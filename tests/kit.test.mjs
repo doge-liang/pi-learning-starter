@@ -157,6 +157,9 @@ describe("安装脚本", () => {
 		assert.ok(sh.includes('for src in "$root"/skills/*/'), "install.sh 应遍历 skills 目录而非硬编码");
 		assert.ok(sh.includes('for src in "$root"/extensions/*/'), "install.sh 应遍历 extensions 目录");
 		for (const t of [ps1, sh]) assert.ok(t.includes("PI_CODING_AGENT_DIR"), "应尊重 PI_CODING_AGENT_DIR");
+		assert.match(ps1, /\[switch\]\$WorkspaceSkills/, "install.ps1 应提供 -WorkspaceSkills 开关");
+		assert.ok(sh.includes("WORKSPACE_SKILLS"), "install.sh 应提供 WORKSPACE_SKILLS 开关");
+		for (const t of [ps1, sh]) assert.ok(t.includes(".agents"), "工作区技能应装到 .agents/skills");
 	});
 
 	it("含中文的 .ps1 都带 UTF-8 BOM：Windows PowerShell 5.1 对无 BOM 的中文脚本按 ANSI 解码，整个文件解析失败", () => {
