@@ -1,7 +1,7 @@
 /**
  * kit.test.mjs —— 套件自检：纯文件检查与扩展的纯逻辑测试，不启动 pi，不调用模型。
  *
- * 检查的都是「第一次使用就会暴露」的结构性问题：技能 frontmatter 是否合规（pi 的硬约束），
+ * 检查的都是「第一次使用就会暴露」的结构性问题：技能 frontmatter 是否合规（Agent Skills 规范的硬约束），
  * 技能内引用的 references 是否存在且写法可被模型正确解析，依赖图模板是否符合 mermaid 语法约束，
  * 学习目录约定在 AGENTS.md 与 logging.md 之间是否一致，安装脚本的编码与覆盖范围，语体禁令，
  * 以及 quiz 与 viz-tools 两个扩展的纯逻辑（打乱与判定、mermaid 静态检查）。
@@ -42,7 +42,10 @@ function frontmatter(text) {
 	return out;
 }
 
-describe("技能 frontmatter 符合 pi 的约束", () => {
+/** Agent Skills 规范（agentskills.io）定义的全部 frontmatter 字段 */
+const SPEC_FIELDS = ["name", "description", "license", "compatibility", "metadata", "allowed-tools"];
+
+describe("技能 frontmatter 符合 Agent Skills 规范", () => {
 	it("套件包含四个技能", () => {
 		assert.deepEqual([...skillDirs].sort(), ["fact-check", "quiz", "teach", "viz"]);
 	});
@@ -56,6 +59,11 @@ describe("技能 frontmatter 符合 pi 的约束", () => {
 			assert.ok(fm.description.length <= 1024, `description 过长：${fm.description.length}`);
 			// pi 用 yaml 库解析：未加引号的值里出现「: 」会解析失败，「 #」之后会被当作注释截断
 			assert.doesNotMatch(fm.description, /: |\s#/, "description 含 YAML 特殊序列，需加引号或改写");
+			// 规范只认六个字段；出现别的会被严格实现拒绝
+			for (const k of Object.keys(fm)) assert.ok(SPEC_FIELDS.includes(k), `未定义的 frontmatter 字段：${k}`);
+			assert.equal(fm.license, "MIT", "技能被单独复制时需自带授权信息");
+			assert.ok(fm.compatibility && fm.compatibility.length <= 500, "compatibility 需声明环境依赖且不超过 500 字符");
+			assert.doesNotMatch(fm.compatibility, /: |\s#/, "compatibility 含 YAML 特殊序列");
 		});
 	}
 });

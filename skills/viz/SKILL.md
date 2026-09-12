@@ -1,6 +1,8 @@
 ---
 name: viz
-description: 为一个概念、结构或过程生成一张正确的最小化图示。关系、流程、状态机、时序用 mermaid 代码块嵌入笔记；坐标、几何、内存布局、数值比例用 SVG 写入学习目录的 attachments/ 再嵌入；生成后做源码级自检。当用户说「画个图」「可视化 X」「用图解释」，或调用 /skill:viz <对象>，以及 teach 讲解时判断一张图能替代大段文字时使用。
+description: 为一个概念、结构或过程生成一张正确的最小化图示。关系、流程、状态机、时序用 mermaid 代码块嵌入笔记；坐标、几何、内存布局、数值比例用 SVG 写入学习目录的 attachments/ 再嵌入；生成后做源码级自检。当用户说「画个图」「可视化 X」「用图解释」，或显式点名 viz 技能，以及 teach 讲解时判断一张图能替代大段文字时使用。
+license: MIT
+compatibility: 需在学习目录中运行（目录含 LEARNER.md 或 sessions/）；笔记按 Obsidian 语法书写（mermaid 代码块、wiki 链接、嵌入 SVG）；需要终端工具取本地日期。
 ---
 
 # 最小化图示
@@ -9,7 +11,7 @@ description: 为一个概念、结构或过程生成一张正确的最小化图�
 
 ## 路径约定
 
-`attachments/`、`sessions/` 相对当前工作目录（学习目录）；`references/…` 相对本技能目录。不在技能目录内创建或修改任何文件。开始前用 `bash` 执行 `date +%F` 与 `date +%H:%M` 取得日期与时刻。
+`attachments/`、`sessions/` 相对当前工作目录（学习目录）；`references/…` 相对本技能目录。不在技能目录内创建或修改任何文件。当前目录不存在 `sessions/` 或 `LEARNER.md` 时，先问学习者学习目录在哪，不要就地创建 `attachments/`。开始前取得日期与时刻，不凭印象：客户端已在上下文里给出当天日期时直接采用；否则用终端工具执行 `date +%F` 与 `date +%H:%M`，若报参数或语法错误说明当前是 PowerShell，改用 `Get-Date -Format 'yyyy-MM-dd'` 与 `Get-Date -Format 'HH:mm'`；都不可用时问学习者。
 
 ## 选型
 
