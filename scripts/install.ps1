@@ -1,6 +1,6 @@
 ﻿<#
 .SYNOPSIS
-把仓库 skills\ 下的全部技能（teach-cn、quiz-cn、viz-cn、fact-check-cn）装进 pi 的全局技能目录，
+把仓库 skills\ 下的全部技能（teach、quiz、viz、fact-check）装进 pi 的全局技能目录，
 把 extensions\ 下的用户级扩展（quiz、viz-tools）装进全局扩展目录并安装其 npm 依赖；可选建立学习目录并放入 AGENTS.md。
 
 .DESCRIPTION

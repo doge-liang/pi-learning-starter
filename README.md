@@ -2,7 +2,7 @@
 
 [![CI](https://github.com/doge-liang/pi-learning-starter/actions/workflows/ci.yml/badge.svg)](https://github.com/doge-liang/pi-learning-starter/actions/workflows/ci.yml)
 
-一套以 markdown 为主的一对一教学配置，运行在 [pi](https://github.com/badlogic/pi-mono) 上，由四个技能组成：`teach-cn` 按「摸底 → 规划 → 单步教学」三阶段讲授任意主题，先用逐题测验定位你理解的边缘，再给出依赖图供你确认，然后每次只推进一个推理步并当场检验；`quiz-cn` 随时出题只测不讲；`viz-cn` 为概念生成最小化图示（mermaid 或 SVG）；`fact-check-cn` 对具体断言做分级核查。整个过程写成 Obsidian 库里的笔记（会话记录、依赖图、学习者档案、图示），公式、mermaid 与 SVG 在 Obsidian 中实时渲染。
+一套以 markdown 为主的一对一教学配置，运行在 [pi](https://github.com/badlogic/pi-mono) 上，由四个技能组成：`teach` 按「摸底 → 规划 → 单步教学」三阶段讲授任意主题，先用逐题测验定位你理解的边缘，再给出依赖图供你确认，然后每次只推进一个推理步并当场检验；`quiz` 随时出题只测不讲；`viz` 为概念生成最小化图示（mermaid 或 SVG）；`fact-check` 对具体断言做分级核查。整个过程写成 Obsidian 库里的笔记（会话记录、依赖图、学习者档案、图示），公式、mermaid 与 SVG 在 Obsidian 中实时渲染。
 
 技能部分只由 markdown 构成，不触发 pi 的项目信任流程；第九节的两个扩展是可选的用户级 TypeScript 扩展（代码在本仓库 `extensions/`，随时可读），不想装时用 `-NoExtensions`。教学方法参考 [amosblomqvist/learn](https://github.com/amosblomqvist/learn)，此处为中文本地化改写，不使用该仓库的扩展与子代理（测验与可视化改由本仓库自带的两个轻量扩展实现，事实核查改用免密钥的公开 API）。本套件此前的复杂实现（八角色多实例 hub、Obsidian 插件、JSON 黑板）保留在分支 `archive/hub` 与标签 `v0-hub`；后续按需补回的功能见 [ROADMAP.md](ROADMAP.md)。
 
@@ -47,7 +47,7 @@ npm install -g --ignore-scripts @earendil-works/pi-coding-agent
 ```powershell
 $skills = Join-Path $HOME ".pi\agent\skills"
 New-Item -ItemType Directory -Force $skills | Out-Null
-foreach ($name in "teach-cn", "quiz-cn", "viz-cn", "fact-check-cn") {
+foreach ($name in "teach", "quiz", "viz", "fact-check") {
     Remove-Item -Recurse -Force (Join-Path $skills $name) -ErrorAction Ignore   # 目标已存在时 Copy-Item 会把目录嵌套进去，先删
     Copy-Item -Recurse ".\skills\$name" (Join-Path $skills $name)
 }
@@ -84,21 +84,21 @@ WSL 与 macOS 用 `alias learn='sh <本仓库路径>/scripts/learn.sh'`。
 然后：
 
 ```
-/skill:teach-cn 我想系统入门微分形式，目标是读懂广义斯托克斯定理
+/skill:teach 我想系统入门微分形式，目标是读懂广义斯托克斯定理
 ```
 
-接下来按提示走：回答摸底题，一次一道；在 Obsidian 里看依赖图并确认；然后一步一步往下学。同时在 Obsidian 中打开 `PiLearn/sessions/` 下当天的文件，公式与 mermaid 图会实时渲染。若 `/skill:teach-cn` 不可用，在 `/settings` 里确认「Skill commands」已开启（默认开启）。
+接下来按提示走：回答摸底题，一次一道；在 Obsidian 里看依赖图并确认；然后一步一步往下学。同时在 Obsidian 中打开 `PiLearn/sessions/` 下当天的文件，公式与 mermaid 图会实时渲染。若 `/skill:teach` 不可用，在 `/settings` 里确认「Skill commands」已开启（默认开启）。
 
 四个技能的调用方式（也可以用自然语言，`AGENTS.md` 已把「考考我」「画个图」「核实一下」映射到对应技能）：
 
 | 你说 | 发生什么 |
 |---|---|
-| `/skill:teach-cn <主题或目标>` | 建档、摸底、规划、教学，直到收尾 |
-| `/skill:teach-cn 只摸底 <主题>` | 摸底后写入档案即停，下次直接从规划开始 |
-| `/skill:teach-cn 继续 <主题>` | 读取上次的依赖图与记录，复核薄弱与暂缓节点后接着讲 |
-| `/skill:quiz-cn [范围] [题数]` | 只测不讲：一次一道单选题，答后立即判定；结束给得分、逐题清单与薄弱点，写入当日记录与档案。范围缺省先取今天学过的节点，题数有余时补档案里的薄弱点；题数缺省五道 |
-| `/skill:viz-cn <对象>` | 为一个概念、结构或过程画一张最小化图示：关系与流程用 mermaid 嵌入笔记，几何与坐标用 SVG 写入 `attachments/`；生成后用 `check_mermaid` 检查、用 `render_svg` 渲染成图亲眼核对（没装扩展时退回源码级自检） |
-| `/skill:fact-check-cn <说法>` | 断言重述、类别、判定与失效条件；无法核实时明确标注未核验 |
+| `/skill:teach <主题或目标>` | 建档、摸底、规划、教学，直到收尾 |
+| `/skill:teach 只摸底 <主题>` | 摸底后写入档案即停，下次直接从规划开始 |
+| `/skill:teach 继续 <主题>` | 读取上次的依赖图与记录，复核薄弱与暂缓节点后接着讲 |
+| `/skill:quiz [范围] [题数]` | 只测不讲：一次一道单选题，答后立即判定；结束给得分、逐题清单与薄弱点，写入当日记录与档案。范围缺省先取今天学过的节点，题数有余时补档案里的薄弱点；题数缺省五道 |
+| `/skill:viz <对象>` | 为一个概念、结构或过程画一张最小化图示：关系与流程用 mermaid 嵌入笔记，几何与坐标用 SVG 写入 `attachments/`；生成后用 `check_mermaid` 检查、用 `render_svg` 渲染成图亲眼核对（没装扩展时退回源码级自检） |
+| `/skill:fact-check <说法>` | 断言重述、类别、判定与失效条件；无法核实时明确标注未核验 |
 
 ## 五、常用操作（Windows 默认按键）
 
@@ -112,10 +112,10 @@ WSL 与 macOS 用 `alias learn='sh <本仓库路径>/scripts/learn.sh'`。
 | 模型 | `Ctrl+L` 或 `/model`，选择器内 `Ctrl+S` 切换并存为默认 |
 | 粘贴图片 | `Alt+V` |
 | 引用一份资料 | 输入 `@` 模糊搜索文件 |
-| 上下文将满时压缩 | `/compact 保留依赖图与已通过的节点`，压缩后执行 `/skill:teach-cn 继续 <主题>`：技能会识别为同一会话的续接，不新建文件，只把教学规则找回上下文 |
+| 上下文将满时压缩 | `/compact 保留依赖图与已通过的节点`，压缩后执行 `/skill:teach 继续 <主题>`：技能会识别为同一会话的续接，不新建文件，只把教学规则找回上下文 |
 | 回到之前某条消息处重新开始（会话分支） | `/tree`；教学节点的重讲直接对教师说「重讲节点 N」 |
 | 给会话命名 | `/name 微分形式-第一次` |
-| 次日继续 | 在同一目录执行 `pi -c`，或新开 pi 后 `/skill:teach-cn 继续 <主题>`；更早的会话用 `pi -r` |
+| 次日继续 | 在同一目录执行 `pi -c`，或新开 pi 后 `/skill:teach 继续 <主题>`；更早的会话用 `pi -r` |
 | 导出整段会话 | `/export 微分形式.html` |
 | 修改技能后生效 | `/reload`（回答生成中不可用） |
 | 查看全部快捷键 | `/hotkeys` |
@@ -124,7 +124,7 @@ WSL 与 macOS 用 `alias learn='sh <本仓库路径>/scripts/learn.sh'`。
 
 - **上级目录的 AGENTS.md 会一并加载。** pi 从启动目录逐级向上收集 `AGENTS.md`（同一目录内按 `AGENTS.override.md`、`AGENTS.md`、`CLAUDE.md` 取第一个），库根的约定也会进入上下文。本套件的 `AGENTS.md` 已声明自己优先于上级约定。
 - **信任询问。** 技能装在全局目录，本身不触发项目信任。只有两种情况会在首次启动时询问：学习目录自身含 `.pi\settings.json`、`.pi\extensions`、`.pi\skills`、`.pi\prompts`、`.pi\themes`、`.pi\SYSTEM.md` 或 `.pi\APPEND_SYSTEM.md`；或学习目录及其任一上级目录含 `.agents\skills`。选择信任后写入 `trust.json`，以后不再问；上级目录的 `.pi` 既不触发询问也不会被加载。
-- **系统提示里的技能数量。** 库级与用户级的其它技能都会以名称与描述进入系统提示。想让系统提示只含指定技能，用 `--no-skills` 加若干 `--skill` 路径，例如只保留 teach-cn 与 quiz-cn：`pi --no-skills --skill "$HOME\.pi\agent\skills\teach-cn" --skill "$HOME\.pi\agent\skills\quiz-cn"`。
+- **系统提示里的技能数量。** 库级与用户级的其它技能都会以名称与描述进入系统提示。想让系统提示只含指定技能，用 `--no-skills` 加若干 `--skill` 路径，例如只保留 teach 与 quiz：`pi --no-skills --skill "$HOME\.pi\agent\skills\teach" --skill "$HOME\.pi\agent\skills\quiz"`。
 - **PowerShell 工具。** pi 默认给模型 `bash` 工具（经 Git Bash）。0.84.3 起可在 `settings.json` 用 `"defaultTools": ["read", "bash", "powershell", "edit", "write"]` 额外启用 `powershell` 工具；`AGENTS.md` 的安全边界同时覆盖二者。
 - **中文输入法候选框错位。** 在 `settings.json` 设置 `"showHardwareCursor": true`。
 - **一次只跑一个 pi 写同一个学习目录。** 需要并行（例如另开一个会话做评审），用不同主题或等前一个收尾。
@@ -137,9 +137,9 @@ WSL 与 macOS 用 `alias learn='sh <本仓库路径>/scripts/learn.sh'`。
 
 ## 八、按自己的方式修改
 
-`teach-cn` 是一份可读的 markdown，改它就是改教学方式：
+`teach` 是一份可读的 markdown，改它就是改教学方式：
 
-- 节奏太慢：放宽 `skills/teach-cn/SKILL.md` 阶段 3「一步是什么」的粒度定义。
+- 节奏太慢：放宽 `skills/teach/SKILL.md` 阶段 3「一步是什么」的粒度定义。
 - 摸底太长：把 SKILL.md 阶段 1 的知识链数量上限从六条降到三条，或把二十五题的上限调低。
 - 想要不同的笔记结构：改 `references/logging.md` 中的模板。
 - 想固定某个学科的处理方式：改 `references/subjects.md`。
@@ -151,14 +151,14 @@ WSL 与 macOS 用 `alias learn='sh <本仓库路径>/scripts/learn.sh'`。
 
 安装脚本会把 `extensions\` 下的两个扩展复制到 `$HOME\.pi\agent\extensions\`（用户级扩展不经过项目信任流程；代码就在本仓库里，随时可读）：
 
-- **quiz**：给模型一个 `quiz` 工具。模型只提供题干、裸断言选项、正确项下标与解析；选项由代码打乱、固定附加「我不知道」，学习者在弹出的选择框里用方向键作答，随即弹出判定与解析，结构化结果返回模型。`teach-cn` 的摸底题与检验题、`quiz-cn` 的测验都优先走这个工具，没有它时退回对话格式。
-- **viz-tools**：给模型 `render_svg`（把 SVG 渲染成 PNG 并作为图片返回，让模型亲眼核对坐标、重叠与箭头方向）与 `check_mermaid`（静态检查 mermaid 里在 Obsidian 中最常见的解析失败写法）。渲染优先用 npm 预编译的 `@resvg/resvg-js`（脚本会在扩展目录里 `npm install`，Windows 无需额外安装），其次系统里的 `rsvg-convert` 或 ImageMagick；依赖安装失败时 `render_svg` 会给出提示，`viz-cn` 退回源码级自检。
+- **quiz**：给模型一个 `quiz` 工具。模型只提供题干、裸断言选项、正确项下标与解析；选项由代码打乱、固定附加「我不知道」，学习者在弹出的选择框里用方向键作答，随即弹出判定与解析，结构化结果返回模型。`teach` 的摸底题与检验题、`quiz` 的测验都优先走这个工具，没有它时退回对话格式。
+- **viz-tools**：给模型 `render_svg`（把 SVG 渲染成 PNG 并作为图片返回，让模型亲眼核对坐标、重叠与箭头方向）与 `check_mermaid`（静态检查 mermaid 里在 Obsidian 中最常见的解析失败写法）。渲染优先用 npm 预编译的 `@resvg/resvg-js`（脚本会在扩展目录里 `npm install`，Windows 无需额外安装），其次系统里的 `rsvg-convert` 或 ImageMagick；依赖安装失败时 `render_svg` 会给出提示，`viz` 退回源码级自检。
 
-不想装扩展时用 `.\scripts\install.ps1 -NoExtensions`（sh 版设 `NO_EXTENSIONS=1`）。事实核查不需要扩展：`fact-check-cn` 用 `curl` 查免密钥的公开 API（Crossref、OpenAlex、arXiv、Wikipedia、npm 等，见 `skills/fact-check-cn/references/verify.md`），`AGENTS.md` 的安全边界已允许这类只读请求。
+不想装扩展时用 `.\scripts\install.ps1 -NoExtensions`（sh 版设 `NO_EXTENSIONS=1`）。事实核查不需要扩展：`fact-check` 用 `curl` 查免密钥的公开 API（Crossref、OpenAlex、arXiv、Wikipedia、npm 等，见 `skills/fact-check/references/verify.md`），`AGENTS.md` 的安全边界已允许这类只读请求。
 
 ## 十、可选增强
 
-- **联网核查**：安装 [badlogic/pi-skills](https://github.com/badlogic/pi-skills) 的 `brave-search` 技能，`fact-check-cn` 会自动利用它。只复制这一个技能，整个仓库放进技能目录会让其中全部技能都进入系统提示：`git clone https://github.com/badlogic/pi-skills $env:TEMP\pi-skills`，然后 `Copy-Item -Recurse $env:TEMP\pi-skills\brave-search "$HOME\.pi\agent\skills\brave-search"`，在 `$HOME\.pi\agent\skills\brave-search` 里 `npm install`；需要 Brave 的 API key。
+- **联网核查**：安装 [badlogic/pi-skills](https://github.com/badlogic/pi-skills) 的 `brave-search` 技能，`fact-check` 会自动利用它。只复制这一个技能，整个仓库放进技能目录会让其中全部技能都进入系统提示：`git clone https://github.com/badlogic/pi-skills $env:TEMP\pi-skills`，然后 `Copy-Item -Recurse $env:TEMP\pi-skills\brave-search "$HOME\.pi\agent\skills\brave-search"`，在 `$HOME\.pi\agent\skills\brave-search` 里 `npm install`；需要 Brave 的 API key。
 - **原仓库的扩展**（测验弹窗、子代理事实核查与自动图示）依赖 [pi-interactive-subagents](https://github.com/amosblomqvist/pi-interactive-subagents)，而它只支持 tmux，Windows 原生下不可用；需要时在 WSL 中另行搭建，并注意 pi 没有沙箱，信任一个含 `extensions/` 的 `.pi` 目录等于允许其中代码在你的机器上执行，启用前先通读。
 
 ## 附录 A：WSL 与 macOS
@@ -185,11 +185,11 @@ MIT，见 [LICENSE](LICENSE)。教学方法的来源 amosblomqvist/learn 另有�
 
 ```
 AGENTS.md                         学习目录约定（复制到学习目录根部）
-skills/teach-cn/SKILL.md          教学技能：三阶段流程、单步展开、答错处理、收尾
-skills/teach-cn/references/       logging.md 文件模板与写入时机；subjects.md 分学科约定；fact-check.md 讲授中的事实纪律
-skills/quiz-cn/SKILL.md           随时测验技能
-skills/viz-cn/SKILL.md            最小化图示技能；references/svg.md 是 SVG 规则与自检清单
-skills/fact-check-cn/SKILL.md     断言核查技能；references/verify.md 是免密钥核查渠道与 curl 用法
+skills/teach/SKILL.md          教学技能：三阶段流程、单步展开、答错处理、收尾
+skills/teach/references/       logging.md 文件模板与写入时机；subjects.md 分学科约定；fact-check.md 讲授中的事实纪律
+skills/quiz/SKILL.md           随时测验技能
+skills/viz/SKILL.md            最小化图示技能；references/svg.md 是 SVG 规则与自检清单
+skills/fact-check/SKILL.md     断言核查技能；references/verify.md 是免密钥核查渠道与 curl 用法
 extensions/quiz/                  quiz 工具：打乱选项、弹出选择框、即时判定（index.ts 接 pi，logic.mjs 是纯逻辑）
 extensions/viz-tools/             render_svg 与 check_mermaid 工具（package.json 声明 @resvg/resvg-js）
 scripts/install.ps1 / install.sh  安装脚本（技能、扩展及其依赖、学习目录）

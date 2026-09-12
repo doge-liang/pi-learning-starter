@@ -1,5 +1,5 @@
 /**
- * viz-tools —— 给 viz-cn 技能的两件工具。
+ * viz-tools —— 给 viz 技能的两件工具。
  *
  * render_svg：把 SVG 文件光栅化成 PNG 并作为图片返回给模型，让模型能亲眼核对坐标、
  * 重叠与箭头方向（pi 的 read 只把 SVG 当文本）。优先用 npm 预编译的 @resvg/resvg-js

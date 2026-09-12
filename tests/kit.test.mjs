@@ -44,7 +44,7 @@ function frontmatter(text) {
 
 describe("技能 frontmatter 符合 pi 的约束", () => {
 	it("套件包含四个技能", () => {
-		assert.deepEqual([...skillDirs].sort(), ["fact-check-cn", "quiz-cn", "teach-cn", "viz-cn"]);
+		assert.deepEqual([...skillDirs].sort(), ["fact-check", "quiz", "teach", "viz"]);
 	});
 	for (const dir of skillDirs) {
 		it(`${dir}：name 与目录同名、合法；description 非空、不超过 1024 字符、无 YAML 特殊序列`, () => {
@@ -91,7 +91,7 @@ describe("references 引用可被解析", () => {
 });
 
 describe("依赖图模板符合 mermaid 语法约束", () => {
-	const logging = read("skills/teach-cn/references/logging.md");
+	const logging = read("skills/teach/references/logging.md");
 	const blocks = [...logging.matchAll(/```mermaid\r?\n([\s\S]*?)```/g)].map((m) => m[1]);
 
 	it("存在模板且以 graph TD 开头，定义了四个状态样式类", () => {
@@ -100,7 +100,7 @@ describe("依赖图模板符合 mermaid 语法约束", () => {
 		for (const cls of STATES) assert.match(blocks[0], new RegExp(`classDef ${cls} `));
 	});
 
-	it("模板通过 viz-tools 的静态检查（与 viz-cn 技能的规则一致）", () => {
+	it("模板通过 viz-tools 的静态检查（与 viz 技能的规则一致）", () => {
 		for (const block of blocks) assert.deepEqual(lintMermaid(block), []);
 	});
 });
@@ -108,7 +108,7 @@ describe("依赖图模板符合 mermaid 语法约束", () => {
 describe("学习目录约定在 AGENTS.md、logging.md 与 README 之间一致", () => {
 	it("AGENTS.md 与 logging.md 都声明 LEARNER.md、maps/、sessions/、attachments/", () => {
 		const agents = read("AGENTS.md");
-		const logging = read("skills/teach-cn/references/logging.md");
+		const logging = read("skills/teach/references/logging.md");
 		for (const p of ["LEARNER.md", "maps/", "sessions/", "attachments/"]) {
 			assert.ok(agents.includes(p), `AGENTS.md 未声明 ${p}`);
 			assert.ok(logging.includes(p), `logging.md 未声明 ${p}`);
@@ -184,10 +184,10 @@ describe("扩展结构", () => {
 		}
 	});
 
-	it("技能在工具可用时改走工具：quiz-cn 与 teach-cn 提及 quiz，viz-cn 提及 render_svg 与 check_mermaid", () => {
-		assert.ok(read("skills/quiz-cn/SKILL.md").includes("`quiz`"));
-		assert.ok(read("skills/teach-cn/SKILL.md").includes("`quiz`"));
-		const viz = read("skills/viz-cn/SKILL.md");
+	it("技能在工具可用时改走工具：quiz 与 teach 提及 quiz，viz 提及 render_svg 与 check_mermaid", () => {
+		assert.ok(read("skills/quiz/SKILL.md").includes("`quiz`"));
+		assert.ok(read("skills/teach/SKILL.md").includes("`quiz`"));
+		const viz = read("skills/viz/SKILL.md");
 		assert.ok(viz.includes("`render_svg`") && viz.includes("`check_mermaid`"));
 	});
 });

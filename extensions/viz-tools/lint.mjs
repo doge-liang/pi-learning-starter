@@ -1,5 +1,5 @@
 /**
- * viz-tools/lint.mjs —— mermaid 源码的静态检查：实现 viz-cn 技能里的语法约束。
+ * viz-tools/lint.mjs —— mermaid 源码的静态检查：实现 viz 技能里的语法约束。
  * 不做完整解析（那需要浏览器环境），只抓在 Obsidian 里最常见的几类解析失败与
  * 会让 edit 失去唯一锚点的写法。与 pi 无关，可在 Node 里直接测试。
  */

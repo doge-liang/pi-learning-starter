@@ -30,7 +30,7 @@ if (-not (Test-Path (Join-Path $dir "AGENTS.md"))) {
 $agentDir = if ($env:PI_CODING_AGENT_DIR) { $env:PI_CODING_AGENT_DIR } else { Join-Path $HOME ".pi\agent" }
 $skillsDir = Join-Path $agentDir "skills"
 $flags = @("--no-skills")
-foreach ($name in @("teach-cn", "quiz-cn", "viz-cn", "fact-check-cn")) {
+foreach ($name in @("teach", "quiz", "viz", "fact-check")) {
     $p = Join-Path $skillsDir $name
     if (Test-Path (Join-Path $p "SKILL.md")) { $flags += @("--skill", $p) } else { Write-Warning "未安装技能 $name（先运行 scripts\install.ps1）" }
 }

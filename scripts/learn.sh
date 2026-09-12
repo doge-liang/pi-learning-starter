@@ -13,7 +13,7 @@ fi
 
 agent_dir="${PI_CODING_AGENT_DIR:-$HOME/.pi/agent}"
 set -- --no-skills "$@"
-for name in teach-cn quiz-cn viz-cn fact-check-cn; do
+for name in teach quiz viz fact-check; do
   p="$agent_dir/skills/$name"
   if [ -f "$p/SKILL.md" ]; then
     set -- "$@" --skill "$p"
